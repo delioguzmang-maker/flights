@@ -1,5 +1,5 @@
 // Runs delta_fare_finder.js in a sandbox with a fake fetch built from the
-// response recorded in the HAR capture. Run with: node --test tests/
+// response recorded in the HAR capture. Run with: node --test tests/*.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -9,23 +9,38 @@ const root = new URL('..', import.meta.url);
 const script = readFileSync(new URL('delta_fare_finder.js', root), 'utf8');
 const fixture = JSON.parse(readFileSync(new URL('tests/fixtures/flex_roundtrip_CHS_MXP.json', root), 'utf8'));
 
-// Deterministic per-airport surcharge so routes rank predictably.
-const surcharge = { CHS: 0, CAE: 40, GSP: 60, CLT: -30, FRA: 10, MUC: -50, BER: 30, DUS: 20, HAM: 25, STR: 35, FCO: -20, MXP: 0, VCE: 15, BLQ: 45, FLR: 50 };
+// Deterministic per-airport surcharge so routes rank predictably; unlisted airports +40.
+const SURCHARGE = { CHS: 0, CAE: 40, GSP: 60, CLT: -30, FRA: 10, MUC: -50, BER: 30, DUS: 20, HAM: 25, STR: 35, FCO: -20, MXP: 0, VCE: 15, BLQ: 45, FLR: 50, AMS: -90, ATL: -120 };
+const s = code => SURCHARGE[code] ?? 40;
+const HOMES = ['CHS', 'CAE', 'GSP', 'CLT'];
+const GERMANY = ['FRA', 'MUC', 'BER', 'DUS', 'HAM', 'STR', 'NUE', 'CGN', 'LEJ', 'HAJ'];
+// Settings that switch off everything v1 of the script didn't do.
+const BASIC = { moreAirports: {}, extraHomeAirports: {}, searchNearbyAirports: false, otherWeeks: false };
 
-const GERMANY = ['FRA', 'MUC', 'BER', 'DUS', 'HAM', 'STR'];
 const plain = x => JSON.parse(JSON.stringify(x)); // copy out of the vm realm for deepEqual
+const shift = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
+const daysFrom = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 864e5);
 
-const scaled = (response, delta, tripTypeText) => {
-  const copy = structuredClone(response);
-  for (const set of copy.data.gqlSearchOffers.gqlOffersSets) {
+// The recorded 7×7 grid (centred on Dec 17 / Dec 25), moved to the requested dates and
+// repriced: + delta, and whole weeks earlier cost $40/week less, later $50/week more.
+function grid(legs, delta, tripTypeText) {
+  const copy = structuredClone(fixture.response);
+  const outShift = daysFrom('2026-12-17', legs[0].departureLocalTs.slice(0, 10));
+  const retShift = daysFrom('2026-12-25', legs[1].departureLocalTs.slice(0, 10));
+  const weeks = Math.round(outShift / 7);
+  const weekDelta = weeks < 0 ? 40 * weeks : 50 * weeks;
+  const g = copy.data.gqlSearchOffers;
+  for (const set of g.gqlOffersSets) {
+    set.itineraryDepartureDate = shift(set.itineraryDepartureDate, outShift);
     for (const offer of set.offers) {
       const price = offer.offerPricing[0].totalAmt.currencyEquivalentPrice;
-      price.currencyAmt = Math.round((price.currencyAmt + delta) * 100) / 100;
+      price.currencyAmt = Math.round((price.currencyAmt + delta + weekDelta) * 100) / 100;
     }
   }
-  if (tripTypeText) copy.data.gqlSearchOffers.offerDataList.responseProperties.tripTypeText = tripTypeText;
+  g.offerDataList.flexReturnDates = g.offerDataList.flexReturnDates.map(d => shift(d, retShift));
+  if (tripTypeText) g.offerDataList.responseProperties.tripTypeText = tripTypeText;
   return copy;
-};
+}
 
 // One-way grid: 7 sets, each with 7 offers; only offers[i] in set i is the real fare
 // (that's how delta.com reads it), the rest are decoys.
@@ -34,7 +49,7 @@ const oneWayGrid = (base, center) => ({
     gqlSearchOffers: {
       offerResponseId: 'x',
       gqlOffersSets: Array.from({ length: 7 }, (_, i) => ({
-        itineraryDepartureDate: new Date(Date.parse(`${center}Z`) + (i - 3) * 864e5).toISOString().slice(0, 10),
+        itineraryDepartureDate: shift(center.slice(0, 10), i - 3),
         offers: Array.from({ length: 7 }, (_, j) => ({
           offerId: `o${i}${j}`,
           additionalOfferProperties: { offered: null, soldOut: i === 3 ? true : null, lowestFare: false, totalTripStopCnt: 1, discountAvailable: false },
@@ -46,7 +61,32 @@ const oneWayGrid = (base, center) => ({
   },
 });
 
-function makeSandbox({ config = {}, storage = new Map(), openJawUnsupported = false } = {}) {
+// Nearby-airports grid as the site's parser reads it: rows = origin airports, columns =
+// flexDestinationAirportCodes. GSO turns up near the home airport; SZG / BGY near Europe.
+const nearbyGrid = (from, to) => {
+  const origins = [from, 'GSO'];
+  const destinations = [to, GERMANY.includes(to) ? 'SZG' : 'BGY'];
+  return {
+    data: {
+      gqlSearchOffers: {
+        offerResponseId: 'n',
+        gqlOffersSets: origins.map(o => ({
+          originAirportCode: o,
+          offers: destinations.map(d => ({
+            soldOut: false,
+            offerPricing: [{ totalAmt: { currencyEquivalentPrice: { roundedCurrencyAmt: 0, formattedCurrencyAmt: String(700 + s(o) + s(d)) } } }],
+            additionalOfferProperties: { lowestFare: false, offered: null, discountAvailable: false },
+          })),
+        })),
+        offerDataList: { flexDestinationAirportCodes: destinations, pricingOptions: [{ pricingOptionDetail: { currencyCode: 'USD' } }], responseProperties: { tripTypeText: 'ROUND_TRIP' } },
+      },
+    },
+  };
+};
+
+const ERROR = (code, more) => ({ errors: [{ message: 'error', extensions: { errors: { code, moreInfo: [{ code: more }] } } }], data: { gqlSearchOffers: null } });
+
+function makeSandbox({ config = {}, storage = new Map(), openJawUnsupported = false, nearbyUnsupported = false } = {}) {
   const calls = [];
   const logs = [];
   const downloads = [];
@@ -70,34 +110,41 @@ function makeSandbox({ config = {}, storage = new Map(), openJawUnsupported = fa
     assert.equal(h.applicationId, 'DC');
     assert.equal(h.channelId, 'DCOM');
     assert.equal(h.Airline, 'DL');
-    assert.equal(h['x-app-route'], 'dates');
     assert.equal(h['x-app-type'], 'dcom-shop');
     assert.match(h.TransactionId, /^[0-9a-f-]{36}_\d+$/);
 
     const body = JSON.parse(init.body);
-    assert.equal(body.query, fixture.query);
     const legs = body.variables.offerSearchCriteria.offersCriteria.flightRequestCriteria.searchOriginDestination;
     const a = legs[0].origins[0].airportCode;
     const b = legs[0].destinations[0].airportCode;
 
+    if (h['x-app-route'] === 'airport') {
+      assert.match(body.query, /flexDestinationAirportCodes/);
+      for (const l of legs) {
+        assert.deepEqual(l.origins[0].airportRadiusMileCnt, { unitOfMeasure: 'MI', unitOfMeasureCnt: 100 });
+        assert.deepEqual(l.destinations[0].airportRadiusMileCnt, { unitOfMeasure: 'MI', unitOfMeasureCnt: 100 });
+        assert.equal(l.calenderDateRequest, undefined);
+      }
+      return json(nearbyUnsupported ? ERROR('ROF4002', '200') : nearbyGrid(a, b));
+    }
+    assert.equal(h['x-app-route'], 'dates');
+    assert.equal(body.query, fixture.query);
+
     if (legs.length === 1) {
-      const europe = surcharge[a] !== undefined && !['CHS', 'CAE', 'GSP', 'CLT'].includes(a) ? a : b;
-      return json(oneWayGrid(520 + surcharge[europe] + (surcharge[a === europe ? b : a] || 0), legs[0].departureLocalTs));
+      const europe = HOMES.includes(a) || a === 'ATL' ? b : a;
+      const home = europe === a ? b : a;
+      return json(oneWayGrid(520 + s(europe) + s(home), legs[0].departureLocalTs));
     }
     const c = legs[1].origins[0].airportCode;
     const d = legs[1].destinations[0].airportCode;
-    if (b === 'NAP' || c === 'NAP') {
-      return json({ errors: [{ message: 'no service', extensions: { errors: { code: 'ROF4002', moreInfo: [{ code: '404' }] } } }], data: { gqlSearchOffers: null } });
-    }
-    if (b === c && a === d) return json(scaled(fixture.response, surcharge[a] + surcharge[b]));
+    if (b === 'NAP' || c === 'NAP') return json(ERROR('ROF4002', '404'));
+    if (b === c && a === d) return json(grid(legs, s(a) + s(b)));
 
     // Open-jaw: answer through the callback flow.
-    if (openJawUnsupported) {
-      return json({ errors: [{ message: 'bad trip', extensions: { errors: { code: 'ROF4002', moreInfo: [{ code: '210' }] } } }] });
-    }
-    const id = `cb-${a}-${b}-${c}-${d}`;
-    const intoItaly = !GERMANY.includes(b) ? 25 : 0; // break the tie between the two directions
-    callbacks.set(id, scaled(fixture.response, surcharge[a] + surcharge[b] + surcharge[c] - 150 + intoItaly, 'MULTI_CITY'));
+    if (openJawUnsupported) return json(ERROR('ROF4002', '210'));
+    const id = `cb-${a}-${b}-${c}-${d}-${legs[0].departureLocalTs}`;
+    const intoItaly = GERMANY.includes(b) ? 0 : 25; // break the tie between the two directions
+    callbacks.set(id, grid(legs, s(a) + s(b) + s(c) - 150 + intoItaly, 'MULTI_CITY'));
     return json({ errors: [{ message: 'pending', extensions: { errors: { code: 'ROF5004', moreInfo: [{ code: 'PXY1007', callbackId: id, callbackInSecs: 2 }] } } }] });
   }
 
@@ -121,30 +168,32 @@ function makeSandbox({ config = {}, storage = new Map(), openJawUnsupported = fa
   };
   context.window = context;
   vm.createContext(context);
-  return { context, calls, logs, downloads, storage, run: () => vm.runInContext(script, context) };
+  const posts = route => calls.filter(c => c.init.method === 'POST' && (!route || c.init.headers['x-app-route'] === route));
+  const legsOf = c => JSON.parse(c.init.body).variables.offerSearchCriteria.offersCriteria.flightRequestCriteria.searchOriginDestination;
+  return { context, calls, logs, downloads, storage, posts, legsOf, run: () => vm.runInContext(script, context) };
 }
 
 test('request body matches what delta.com sent in the HAR', async () => {
-  const sb = makeSandbox({ config: { homeAirports: ['CHS'], destinations: { Italy: ['MXP'] }, visitCountries: ['Italy'], searchOneWays: false, searchOpenJaw: false } });
+  const sb = makeSandbox({ config: { ...BASIC, homeAirports: ['CHS'], destinations: { Italy: ['MXP'] }, visitCountries: ['Italy'], searchOneWays: false, searchOpenJaw: false } });
   await sb.run();
   assert.equal(sb.calls.length, 1);
   const body = JSON.parse(sb.calls[0].init.body);
   assert.deepEqual(body.variables, fixture.request);
+  assert.equal(body.query, fixture.query);
 });
 
-test('full default run ranks round trips, open-jaws and one-way pairs', async () => {
-  const sb = makeSandbox();
+test('round trips, open-jaws and one-way pairs on your dates', async () => {
+  const sb = makeSandbox({ config: BASIC });
   await sb.run();
   const { rows, trips, bestPerRoute, csv } = plain(sb.context.deltaFares);
 
-  const posts = sb.calls.filter(c => c.init.method === 'POST');
   const rt = 4 * 12; // homes × destinations, one 7×7 block
   const oj = 4 * 3 * 3 * 2; // homes × gateways DE × gateways IT × direction
-  const ow = 4 * 6 * 2; // homes × gateways × out/back
-  assert.equal(posts.length, rt + oj + ow);
-  assert.equal(sb.calls.length - posts.length, oj, 'one callback poll per open-jaw search');
+  const ow = 2 * 6 * 2; // 2 cheapest homes × gateways × out/back
+  assert.equal(sb.posts().length, rt + oj + ow);
+  assert.equal(sb.calls.length - sb.posts().length, oj, 'one callback poll per open-jaw search');
 
-  // RT grid parsed like delta.com: 7×7, minus nothing (fixture has every cell priced).
+  // RT grid parsed like delta.com: 7×7, every cell priced in the fixture.
   const chsMxp = rows.filter(r => r.kind === 'RT' && r.from === 'CHS' && r.to === 'MXP');
   assert.equal(chsMxp.length, 49);
   assert.deepEqual(
@@ -156,7 +205,8 @@ test('full default run ranks round trips, open-jaws and one-way pairs', async ()
   // NAP returned an error, so it has no fares and doesn't break the run.
   assert.equal(rows.filter(r => r.to === 'NAP' || r.from === 'NAP').length, 0);
 
-  // One-way grid uses the diagonal and drops the sold-out day.
+  // One-ways only from the two cheapest home airports (CLT, CHS); diagonal read, sold-out day dropped.
+  assert.deepEqual([...new Set(rows.filter(r => r.kind === 'OW-out').map(r => r.from))].sort(), ['CHS', 'CLT']);
   const ow1 = rows.filter(r => r.kind === 'OW-out' && r.from === 'CLT' && r.to === 'MUC');
   assert.deepEqual(ow1.map(r => r.out), ['2026-12-14', '2026-12-15', '2026-12-16', '2026-12-18', '2026-12-19', '2026-12-20']);
   assert.ok(ow1.every(r => r.price > 100), 'decoy prices must not be used');
@@ -168,9 +218,7 @@ test('full default run ranks round trips, open-jaws and one-way pairs', async ()
   // Cheapest overall is the open-jaw CLT → MUC … FCO → CLT: fixture min 831.59, minus the
   // CLT/MUC/FCO surcharges and the open-jaw discount, plus one 75 hop.
   const top = bestPerRoute[0];
-  assert.equal(top.strategy, 'Open-jaw');
-  assert.equal(top.route, 'CLT → MUC … FCO → CLT');
-  assert.equal(top.hops, 1);
+  assert.deepEqual([top.strategy, top.route, top.hops, top.yourDates], ['Open-jaw', 'CLT → MUC … FCO → CLT', 1, true]);
   assert.equal(Math.round(top.total * 100), Math.round((831.59 - 30 - 50 - 20 - 150 + 75) * 100));
 
   // Round trip into Germany needs two hops to also see Italy.
@@ -178,17 +226,61 @@ test('full default run ranks round trips, open-jaws and one-way pairs', async ()
   assert.equal(rtTrip.hops, 2);
   assert.equal(rtTrip.total, rtTrip.airfare + 150);
 
-  // bestPerRoute has one entry per route, sorted.
   const keys = bestPerRoute.map(t => [t.strategy, t.from, t.to, t.from2, t.to2].join('|'));
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(bestPerRoute.every((t, i) => i === 0 || bestPerRoute[i - 1].total <= t.total));
-
-  // One-way pairs come home to the same airport unless mixHomeAirports is on.
   assert.ok(trips.filter(t => t.strategy === 'Two one-ways').every(t => t.from === t.to2));
+  assert.ok(trips.every(t => t.yourDates));
 
-  assert.ok(csv.startsWith('strategy,route,from,to,from2,to2,out,ret,nights,stops,airfare,hops,total\n'));
+  assert.ok(csv.startsWith('strategy,route,from,to,from2,to2,out,ret,nights,stops,airfare,hops,total,yourDates\n'));
   assert.equal(sb.downloads.length, 2);
   assert.ok(sb.logs.some(l => l.includes('How to book')));
+});
+
+test('default plan also tries more airports, nearby airports, more home airports and other weeks', async () => {
+  const sb = makeSandbox();
+  await sb.run();
+  const fares = plain(sb.context.deltaFares);
+  const { rows, trips, bestPerRoute, otherDates, discovered } = fares;
+  const legsOf = c => sb.legsOf(c).map(l => [l.origins[0].airportCode, l.destinations[0].airportCode, l.departureLocalTs.slice(0, 10)]);
+  const dates = sb.posts('dates').map(legsOf);
+
+  // More airports: from the two cheapest homes (CLT, CHS) to every extra airport.
+  const more = ['NUE', 'CGN', 'LEJ', 'HAJ', 'PSA', 'LIN', 'TRN', 'BRI', 'CTA', 'AMS', 'CDG', 'MAD', 'BCN', 'ZRH', 'VIE', 'DUB', 'LIS'];
+  for (const a of more) {
+    assert.deepEqual(dates.filter(l => l.length === 2 && l[0][1] === a && l[1][1] === l[0][0]).map(l => l[0][0]).sort(), ['CHS', 'CLT'], a);
+  }
+  // A third country costs one more hop: a round trip to Amsterdam needs 3.
+  const ams = trips.find(t => t.strategy === 'Round trip' && t.to === 'AMS');
+  assert.equal(ams.hops, 3);
+
+  // Nearby airports: one search per top home × visit country, on that route's best dates.
+  const nearby = sb.posts('airport').map(legsOf);
+  assert.equal(nearby.length, 4);
+  assert.deepEqual(nearby.map(l => l[0][0]).sort(), ['CHS', 'CHS', 'CLT', 'CLT']);
+  assert.deepEqual(discovered.sort(), ['BGY', 'GSO', 'SZG']);
+  assert.ok(rows.some(r => r.kind === 'RT' && r.from === 'GSO' && r.to === 'SZG'));
+  assert.equal(trips.find(t => t.to === 'SZG' && t.strategy === 'Round trip').hops, 2, 'SZG counts as Germany (it is near MUC)');
+
+  // More home airports: each extra home × the 6 gateways; ATL's $100 extra cost is in the total.
+  const atl = dates.filter(l => l[0][0] === 'ATL');
+  assert.equal(atl.length, 6);
+  const atlTrip = trips.find(t => t.from === 'ATL');
+  assert.equal(atlTrip.total, atlTrip.airfare + atlTrip.hops * 75 + 100);
+  assert.ok(sb.logs.some(l => l.includes('Best trip from each other home airport')));
+
+  // Other weeks: the 5 cheapest routes on your dates, moved −3…+3 weeks; earlier is cheaper here.
+  const shifted = dates.filter(l => l.length === 2 && l[0][2] !== '2026-12-17'); // your-dates grids are centred on Dec 17
+  assert.equal(shifted.length, 5 * 6);
+  assert.ok(otherDates.length > 0);
+  assert.ok(otherDates.every(t => !t.yourDates));
+  const earliest = otherDates[0];
+  assert.ok(earliest.out < '2026-12-01', earliest.out);
+  const sameRouteYourDates = bestPerRoute.find(t => t.strategy === earliest.strategy && t.route === earliest.route);
+  assert.equal(Math.round(sameRouteYourDates.total - earliest.total), 120, '3 weeks earlier saves 3 × $40');
+  assert.ok(sb.logs.some(l => l.includes('Cheaper if you can move the trip')));
+  assert.ok(bestPerRoute.every(t => t.yourDates));
+  assert.ok(sb.logs.some(l => l.includes('Cheapest round trip to each European airport')));
 });
 
 test('second run is served from the cache', async () => {
@@ -201,18 +293,21 @@ test('second run is served from the cache', async () => {
   assert.equal(second.context.deltaFares.bestPerRoute[0].route, first.context.deltaFares.bestPerRoute[0].route);
 });
 
-test('open-jaw phase is skipped when the API rejects multi-city grids', async () => {
-  const sb = makeSandbox({ openJawUnsupported: true, config: { searchOneWays: false } });
+test('phases the API rejects are skipped after three failures', async () => {
+  const sb = makeSandbox({ openJawUnsupported: true, nearbyUnsupported: true, config: { searchOneWays: false } });
   await sb.run();
-  const ojPosts = sb.calls.filter(c => JSON.parse(c.init.body).variables.offerSearchCriteria.offersCriteria.flightRequestCriteria.searchOriginDestination
-    .reduce((acc, l, i, legs) => acc || (i === 1 && l.origins[0].airportCode !== legs[0].destinations[0].airportCode), false));
+  const ojPosts = sb.posts('dates').filter(c => {
+    const legs = sb.legsOf(c);
+    return legs.length === 2 && legs[1].origins[0].airportCode !== legs[0].destinations[0].airportCode;
+  });
   assert.equal(ojPosts.length, 3);
-  assert.ok(sb.logs.some(l => l.includes('Skipping the rest')));
+  assert.equal(sb.posts('airport').length, 3);
+  assert.equal(sb.logs.filter(l => l.includes('Skipping the rest')).length, 2);
   assert.ok(sb.context.deltaFares.trips.length > 0);
 });
 
 test('mixHomeAirports pairs one-ways across home airports and stop flag halts cleanly', async () => {
-  const sb = makeSandbox({ config: { searchOpenJaw: false, mixHomeAirports: true, homeAirportExtraCost: { CHS: 0, CAE: 0, GSP: 0, CLT: 100 } } });
+  const sb = makeSandbox({ config: { ...BASIC, searchOpenJaw: false, mixHomeAirports: true, homeAirportExtraCost: { CHS: 0, CAE: 0, GSP: 0, CLT: 100 } } });
   await sb.run();
   const mixed = plain(sb.context.deltaFares.trips).filter(t => t.strategy === 'Two one-ways' && t.from !== t.to2);
   assert.ok(mixed.length > 0);

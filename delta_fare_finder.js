@@ -6,13 +6,20 @@
  * then ranks round trips, open-jaw (multi-city) trips and pairs of one-way tickets by
  * what the whole trip costs, including getting between countries once you're in Europe.
  *
+ * Beyond your own airports and dates it also checks, by default:
+ *   - more airports: smaller German/Italian airports and cheap hubs elsewhere in Europe
+ *     (Amsterdam, Paris, Madrid, …) that you'd continue from by train or budget flight;
+ *   - airports Delta itself lists within 100 miles of your best routes (experimental);
+ *   - more home airports you could drive to (Atlanta is Delta's hub), with a cost you set;
+ *   - earlier and later weeks for the cheapest routes, in case moving the trip saves money.
+ *
  * HOW TO RUN
  *   1. Open https://www.delta.com in Chrome or Edge (any page, logged in or not).
  *   2. Open DevTools (F12, or Cmd+Option+J on a Mac) and pick the Console tab.
  *   3. Change CONFIG below if you want (dates, airports), paste this whole file and press
  *      Enter. Chrome may first ask you to type "allow pasting".
- *   4. Leave the tab open. Progress prints as it goes (a full run is ~170 searches,
- *      about 8–10 minutes). Results print as tables and download as CSV + JSON.
+ *   4. Leave the tab open. Progress prints as it goes (the default plan is ~240 searches,
+ *      about 13–15 minutes). Results print as tables and download as CSV + JSON.
  *
  * Stop early:  window.DELTA_FARE_STOP = true   (the results so far are still ranked)
  * Re-running is cheap: grids fetched in the last few hours are reused from localStorage,
@@ -36,6 +43,7 @@
     // Countries the trip has to include, and your estimate (per person) for one
     // train / budget-airline hop between them. A round trip into Germany needs two hops
     // (Germany → Italy → back to Germany); flying into Germany and home from Italy needs one.
+    // Flying into a third country (say Amsterdam) counts as one more place to travel through.
     visitCountries: ['Germany', 'Italy'],
     hopCost: 75,
 
@@ -54,13 +62,38 @@
     searchOpenJaw: true, // multi-city: into one country, home from another
     searchOneWays: true, // two separate one-way tickets
     // Open-jaw and one-way searches only use the N cheapest airports per country
-    // from the round-trip scan, to keep the number of searches down.
+    // from the round-trip scans, to keep the number of searches down.
     gatewaysPerCountry: 3,
     // Let one-way pairs leave from one home airport and return to another.
     mixHomeAirports: false,
 
+    // ----- other possibilities (set any of these to false / {} / [] to skip) -----
+    // The exploring phases below search only from your N cheapest home airports
+    // (in the last run all four were within $10 of each other).
+    exploreFromTopHomes: 2,
+    // More places to fly into, grouped by country. Airports in a visitCountries country
+    // count as that country; anything else adds a hop (you'd take a train/budget flight on).
+    moreAirports: {
+      Germany: ['NUE', 'CGN', 'LEJ', 'HAJ'],
+      Italy: ['PSA', 'LIN', 'TRN', 'BRI', 'CTA'],
+      Netherlands: ['AMS'],
+      France: ['CDG'],
+      Spain: ['MAD', 'BCN'],
+      Switzerland: ['ZRH'],
+      Austria: ['VIE'],
+      Ireland: ['DUB'],
+      Portugal: ['LIS'],
+    },
+    // Ask Delta which airports lie within 100 miles of your best routes, both ends (experimental).
+    searchNearbyAirports: true,
+    // Other home airports and what using each costs you compared with your usual ones
+    // (gas, tolls, parking for the trip). Rough guesses: edit them.
+    extraHomeAirports: { ATL: 100, SAV: 50, MYR: 50, AVL: 50, RDU: 90 },
+    // Re-check the cheapest routes with the whole trip moved earlier or later by these many weeks.
+    otherWeeks: { routes: 5, shifts: [-3, -2, -1, 1, 2, 3] },
+
     delayMs: [1200, 2500], // pause between searches; keep it polite or Delta may block you for a while
-    maxRequests: 400,
+    maxRequests: 500,
     cacheHours: 6,
     showTop: 25,
     download: true,
@@ -152,6 +185,46 @@
   }
 }`;
 
+  // The nearby-airports query delta.com sends, verbatim.
+  const AIRPORTS_QUERY = `query ($offerSearchCriteria: OfferSearchCriteriaInput!) {
+  gqlSearchOffers(offerSearchCriteria: $offerSearchCriteria) {
+    offerResponseId
+    gqlOffersSets {
+      originAirportCode
+      offers {
+        soldOut
+        offerPricing {
+          totalAmt {
+            currencyEquivalentPrice {
+              roundedCurrencyAmt
+              formattedCurrencyAmt
+            }
+            milesEquivalentPrice {
+              mileCnt
+            }
+          }
+        }
+        additionalOfferProperties {
+          lowestFare
+          offered
+          discountAvailable
+        }
+      }
+    }
+    offerDataList {
+      flexDestinationAirportCodes
+      pricingOptions {
+        pricingOptionDetail {
+          currencyCode
+        }
+      }
+      responseProperties {
+        tripTypeText
+      }
+    }
+  }
+}`;
+
   if (!/(^|\.)delta\.com$/.test(location.hostname)) {
     console.error('Run this from a www.delta.com tab — the browser only lets delta.com pages call Delta\'s fare API.');
     return;
@@ -182,20 +255,33 @@
   // ---------- money ----------
   let currency = 'USD';
   const money = n => (n == null ? '' : new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n));
-
   // ---------- airports ----------
   const countryOf = {};
-  for (const [country, airports] of Object.entries(CONFIG.destinations)) for (const a of airports) countryOf[a] = country;
+  const addCountry = (country, airports) => { for (const a of airports) countryOf[a] = countryOf[a] || country; };
+  for (const [country, airports] of Object.entries(CONFIG.destinations)) addCountry(country, airports);
+  for (const [country, airports] of Object.entries(CONFIG.moreAirports || {})) addCountry(country, airports);
   const allDestinations = Object.values(CONFIG.destinations).flat();
+  const moreDestinations = [...new Set(Object.values(CONFIG.moreAirports || {}).flat())].filter(a => !allDestinations.includes(a));
   const homes = CONFIG.homeAirports;
+  const extraHomes = Object.keys(CONFIG.extraHomeAirports || {}).filter(a => !homes.includes(a));
+  const homeCosts = { ...CONFIG.extraHomeAirports, ...CONFIG.homeAirportExtraCost };
   const tripCountries = CONFIG.visitCountries.filter(c => CONFIG.destinations[c]);
+  const discovered = new Set(); // airports found by the nearby-airports search
 
   // ---------- API ----------
+  // Flexible-dates leg: the API answers with a 7×7 grid around the date sent.
   const leg = (from, to, center) => ({
     departureLocalTs: `${center}T00:00:00`,
     destinations: [{ airportCode: to }],
     origins: [{ airportCode: from }],
     calenderDateRequest: { daysBeforeCnt: 3, daysAfterCnt: 3 }, // Delta's spelling
+  });
+  // Nearby-airports leg: exact date, and every airport within 100 miles of each end.
+  const RADIUS = { unitOfMeasure: 'MI', unitOfMeasureCnt: 100 };
+  const nearbyLeg = (from, to, date) => ({
+    departureLocalTs: `${date}T00:00:00`,
+    destinations: [{ airportCode: to, airportRadiusMileCnt: RADIUS }],
+    origins: [{ airportCode: from, airportRadiusMileCnt: RADIUS }],
   });
 
   const searchCriteria = legs => ({
@@ -210,14 +296,15 @@
   });
 
   const transactionPrefix = crypto.randomUUID();
-  // Same headers delta.com sends for a guest search.
-  const offerHeaders = () => ({
+  // Same headers delta.com sends for a guest search. x-app-route is 'dates' for the
+  // flexible-dates grid and 'airport' for the nearby-airports grid.
+  const offerHeaders = route => ({
     Authorization: 'GUEST',
     'Content-Type': 'application/json',
     TransactionId: `${transactionPrefix}_${Date.now()}`,
     applicationId: 'DC',
     'x-app-type': 'dcom-shop',
-    'x-app-route': 'dates',
+    'x-app-route': route,
     channelId: 'DCOM',
     Airline: 'DL',
   });
@@ -285,17 +372,40 @@
     });
     return cells;
   }
+  // Nearby-airports grid, read the way delta.com does: one offer set per origin airport
+  // (originAirportCode), its offers lining up with offerDataList.flexDestinationAirportCodes.
+  function parseAirports(offers) {
+    const props = offers.offerDataList || {};
+    currency = props.pricingOptions?.[0]?.pricingOptionDetail?.currencyCode || currency;
+    const destinations = props.flexDestinationAirportCodes || [];
+    const cells = [];
+    for (const set of offers.gqlOffersSets || []) {
+      (set.offers || []).forEach((offer, j) => {
+        const p = offer.additionalOfferProperties || {};
+        const amount = offer.offerPricing?.[0]?.totalAmt?.currencyEquivalentPrice || {};
+        const price = parseFloat(String(amount.formattedCurrencyAmt ?? '').replace(/,/g, '')) || amount.roundedCurrencyAmt;
+        if (!price || offer.soldOut || p.offered === false || !set.originAirportCode || !destinations[j]) return;
+        cells.push([set.originAirportCode, destinations[j], price]);
+      });
+    }
+    return cells;
+  }
 
-  async function fetchGrid(legs) {
+  const MODES = {
+    dates: { query: QUERY, parse: parseGrid },
+    airport: { query: AIRPORTS_QUERY, parse: parseAirports },
+  };
+
+  async function fetchOffers(mode, legs) {
     let json = await http(OFFERS_URL, {
       method: 'POST',
       credentials: 'include',
-      headers: offerHeaders(),
-      body: JSON.stringify({ variables: { offerSearchCriteria: searchCriteria(legs) }, query: QUERY }),
+      headers: offerHeaders(mode),
+      body: JSON.stringify({ variables: { offerSearchCriteria: searchCriteria(legs) }, query: MODES[mode].query }),
     });
     for (let polls = 0; ; polls++) {
       const offers = json?.data?.gqlSearchOffers;
-      if (offers) return { cells: parseGrid(offers) };
+      if (offers) return { cells: MODES[mode].parse(offers) };
       const err = errorInfo(json?.errors?.[0]);
       if (err.code !== CALLBACK_CODE || !err.callbackId) return { cells: [], error: err.code || err.message || 'empty response' };
       if (polls === 10) return { cells: [], error: 'gave up waiting for callback', transient: true };
@@ -322,16 +432,18 @@
       // Storage full or blocked: carry on without caching.
     }
   };
-
   let requests = 0;
-  async function grid(legs) {
-    const key = JSON.stringify([legs, CONFIG.adults, CONFIG.brand, CONFIG.nonStopOnly]);
+  async function request(mode, legs) {
+    // Dates-grid keys keep the format of earlier versions, so their cache still counts.
+    const key = JSON.stringify(mode === 'dates'
+      ? [legs, CONFIG.adults, CONFIG.brand, CONFIG.nonStopOnly]
+      : [mode, legs, CONFIG.adults, CONFIG.brand, CONFIG.nonStopOnly]);
     if (cache[key]) return { ...cache[key], cached: true };
     if (window.DELTA_FARE_STOP) throw new Halt('stopped by DELTA_FARE_STOP');
     if (requests >= CONFIG.maxRequests) throw new Halt(`reached maxRequests (${CONFIG.maxRequests})`);
     if (requests > 0) await sleep(CONFIG.delayMs[0] + Math.random() * (CONFIG.delayMs[1] - CONFIG.delayMs[0]));
     requests++;
-    const result = await fetchGrid(legs);
+    const result = await fetchOffers(mode, legs);
     if (!result.transient) {
       cache[key] = { t: Date.now(), currency, cells: result.cells, error: result.error };
       saveCache();
@@ -339,101 +451,10 @@
     return result;
   }
 
-  // ---------- searches ----------
-  const rows = [];
+  // ---------- trips ----------
+  const inDates = (out, ret) => inRange(out, CONFIG.departDates) && ret != null && inRange(ret, CONFIG.returnDates);
+  const nightsOk = (out, ret) => nightsBetween(out, ret) >= CONFIG.minNights && nightsBetween(out, ret) <= CONFIG.maxNights;
 
-  async function runTasks(name, tasks, { bailIfUnsupported = false } = {}) {
-    console.log(`%c${name}: ${tasks.length} searches`, 'font-weight:bold');
-    for (const [n, task] of tasks.entries()) {
-      const result = await grid(task.legs);
-      if (result.cached && result.currency) currency = result.currency;
-      task.result = result;
-      for (const [out, ret, price, stops] of result.cells) rows.push({ ...task.row, out, ret, price, stops });
-      const best = result.cells.length ? Math.min(...result.cells.map(c => c[2])) : null;
-      const outcome = best != null ? `from ${money(best)}` : `no fares${result.error ? ` (${result.error})` : ''}`;
-      console.log(`[${name} ${n + 1}/${tasks.length}] ${task.label}: ${outcome}${result.cached ? ' (cached)' : ''}`);
-      if (bailIfUnsupported && n === 2 && tasks.slice(0, 3).every(t => t.result.error)) {
-        console.warn(`${name}: the first 3 searches all failed, so Delta's flexible-dates API probably doesn't price these. Skipping the rest.`);
-        return false;
-      }
-    }
-    return true;
-  }
-
-  const datesLabel = (o, r) => (blockPairs.length > 1 ? ` [${addDays(o, -3)}…${addDays(o, 3)} / ${r ? `${addDays(r, -3)}…${addDays(r, 3)}` : ''}]` : '');
-
-  const roundTripTasks = () => homes.flatMap(h => allDestinations.flatMap(d => blockPairs.map(([o, r]) => ({
-    legs: [leg(h, d, o), leg(d, h, r)],
-    row: { kind: 'RT', from: h, to: d, from2: d, to2: h },
-    label: `${h} ⇄ ${d}${datesLabel(o, r)}`,
-  }))));
-
-  // The N cheapest airports per country from the round-trip scan (or the first N listed).
-  function pickGateways() {
-    const best = {};
-    for (const r of rows) if (r.kind === 'RT') best[r.to] = Math.min(best[r.to] ?? Infinity, r.price);
-    const picked = {};
-    for (const [country, airports] of Object.entries(CONFIG.destinations)) {
-      const priced = airports.filter(a => best[a] != null).sort((a, b) => best[a] - best[b]);
-      picked[country] = (priced.length ? priced : airports).slice(0, CONFIG.gatewaysPerCountry);
-    }
-    return picked;
-  }
-
-  const openJawTasks = gateways => tripCountries.flatMap(inC => tripCountries.filter(c => c !== inC).flatMap(outC =>
-    homes.flatMap(h => gateways[inC].flatMap(x => gateways[outC].flatMap(y => blockPairs.map(([o, r]) => ({
-      legs: [leg(h, x, o), leg(y, h, r)],
-      row: { kind: 'OJ', from: h, to: x, from2: y, to2: h },
-      label: `${h} → ${x} … ${y} → ${h}${datesLabel(o, r)}`,
-    })))))));
-
-  const oneWayTasks = gateways => {
-    const airports = Object.values(gateways).flat();
-    const outbound = homes.flatMap(h => airports.flatMap(x => outCenters.map(o => ({
-      legs: [leg(h, x, o)],
-      row: { kind: 'OW-out', from: h, to: x, from2: null, to2: null },
-      label: `${h} → ${x} one-way${outCenters.length > 1 ? ` [${addDays(o, -3)}…${addDays(o, 3)}]` : ''}`,
-    }))));
-    const inbound = airports.flatMap(x => homes.flatMap(h => retCenters.map(r => ({
-      legs: [leg(x, h, r)],
-      row: { kind: 'OW-back', from: x, to: h, from2: null, to2: null },
-      label: `${x} → ${h} one-way${retCenters.length > 1 ? ` [${addDays(r, -3)}…${addDays(r, 3)}]` : ''}`,
-    }))));
-    return [...outbound, ...inbound];
-  };
-
-  // ---------- plan ----------
-  const plannedGateways = Object.fromEntries(Object.entries(CONFIG.destinations).map(([c, a]) => [c, a.slice(0, CONFIG.gatewaysPerCountry)]));
-  const planned = (CONFIG.searchRoundTrips ? roundTripTasks().length : 0)
-    + (CONFIG.searchOpenJaw ? openJawTasks(plannedGateways).length : 0)
-    + (CONFIG.searchOneWays ? oneWayTasks(plannedGateways).length : 0);
-  const avgSeconds = (CONFIG.delayMs[0] + CONFIG.delayMs[1]) / 2000 + 1.5;
-  console.log(`%cDelta fare finder: up to ${planned} searches (~${Math.ceil((planned * avgSeconds) / 60)} min if none are cached). `
-    + `Departing ${CONFIG.departDates.join('–')}, returning ${CONFIG.returnDates.join('–')}, `
-    + `${homes.join('/')} → ${allDestinations.join('/')}.`, 'font-weight:bold;font-size:13px');
-  if (planned > CONFIG.maxRequests) {
-    console.error(`That's more than maxRequests (${CONFIG.maxRequests}). Narrow the dates/airports or raise maxRequests.`);
-    return;
-  }
-  if (CONFIG.departDates[0] < isoDay(Date.now())) console.warn('departDates starts in the past; those dates will come back empty.');
-
-  window.DELTA_FARE_STOP = false; // clear a stop left over from an earlier run
-  let haltedBy = null;
-  try {
-    if (CONFIG.searchRoundTrips) await runTasks('Round trips', roundTripTasks());
-    const gateways = pickGateways();
-    if (CONFIG.searchOpenJaw && tripCountries.length > 1) {
-      console.log(`Open-jaw gateways: ${JSON.stringify(gateways)}`);
-      await runTasks('Open-jaw', openJawTasks(gateways), { bailIfUnsupported: true });
-    }
-    if (CONFIG.searchOneWays) await runTasks('One-ways', oneWayTasks(gateways));
-  } catch (e) {
-    if (!(e instanceof Halt)) throw e;
-    haltedBy = e.message;
-    console.warn(`Stopped early: ${e.message}. Ranking what was found so far; re-run later to continue (finished searches are cached).`);
-  }
-
-  // ---------- rank ----------
   // Hops between countries once in Europe: the trip starts in the arrival airport's
   // country, must pass through every country in visitCountries, and ends in the
   // departure airport's country.
@@ -443,12 +464,9 @@
     return countries.size > 1 ? countries.size : 0;
   }
 
-  const datesOk = (out, ret) => inRange(out, CONFIG.departDates) && inRange(ret, CONFIG.returnDates)
-    && nightsBetween(out, ret) >= CONFIG.minNights && nightsBetween(out, ret) <= CONFIG.maxNights;
-
   function makeTrip(strategy, from, to, from2, to2, out, ret, airfare, stops) {
     const hops = hopsNeeded(countryOf[to], countryOf[from2]);
-    const homeCost = ((CONFIG.homeAirportExtraCost[from] || 0) + (CONFIG.homeAirportExtraCost[to2] || 0)) / 2;
+    const homeCost = ((homeCosts[from] || 0) + (homeCosts[to2] || 0)) / 2;
     return {
       strategy,
       route: from === to2 && to === from2 ? `${from} ⇄ ${to}` : `${from} → ${to} … ${from2} → ${to2}`,
@@ -458,32 +476,210 @@
       airfare,
       hops,
       total: airfare + hops * CONFIG.hopCost * CONFIG.adults + homeCost,
+      yourDates: inDates(out, ret),
     };
   }
 
-  const trips = [];
-  for (const r of rows) {
-    if ((r.kind === 'RT' || r.kind === 'OJ') && datesOk(r.out, r.ret)) {
-      trips.push(makeTrip(r.kind === 'RT' ? 'Round trip' : 'Open-jaw', r.from, r.to, r.from2, r.to2, r.out, r.ret, r.price, String(r.stops ?? '?')));
-    }
-  }
-  const outbound = rows.filter(r => r.kind === 'OW-out');
-  const inbound = rows.filter(r => r.kind === 'OW-back');
-  for (const a of outbound) {
-    for (const b of inbound) {
-      if ((CONFIG.mixHomeAirports || b.to === a.from) && datesOk(a.out, b.out)) {
-        trips.push(makeTrip('Two one-ways', a.from, a.to, b.from, b.to, a.out, b.out, a.price + b.price, `${a.stops ?? '?'}+${b.stops ?? '?'}`));
+  // Every trip the fares found so far make: round trips and open-jaws on any searched dates,
+  // and one-way pairs on your dates. Cheapest est. total first.
+  function buildTrips() {
+    const trips = [];
+    for (const r of rows) {
+      if ((r.kind === 'RT' || r.kind === 'OJ') && r.ret && nightsOk(r.out, r.ret)) {
+        trips.push(makeTrip(r.kind === 'RT' ? 'Round trip' : 'Open-jaw', r.from, r.to, r.from2, r.to2, r.out, r.ret, r.price, String(r.stops ?? '?')));
       }
     }
+    const outbound = rows.filter(r => r.kind === 'OW-out');
+    const inbound = rows.filter(r => r.kind === 'OW-back');
+    for (const a of outbound) {
+      for (const b of inbound) {
+        if ((CONFIG.mixHomeAirports || b.to === a.from) && inDates(a.out, b.out) && nightsOk(a.out, b.out)) {
+          trips.push(makeTrip('Two one-ways', a.from, a.to, b.from, b.to, a.out, b.out, a.price + b.price, `${a.stops ?? '?'}+${b.stops ?? '?'}`));
+        }
+      }
+    }
+    return trips.sort((a, b) => a.total - b.total || a.airfare - b.airfare);
   }
-  trips.sort((a, b) => a.total - b.total || a.airfare - b.airfare);
 
   // Best dates per route, cheapest first.
-  const seen = new Set();
-  const bestPerRoute = trips.filter(t => {
-    const key = [t.strategy, t.from, t.to, t.from2, t.to2].join('|');
-    return !seen.has(key) && seen.add(key);
+  const bestPerRoute = trips => {
+    const seen = new Set();
+    return trips.filter(t => {
+      const key = [t.strategy, t.from, t.to, t.from2, t.to2].join('|');
+      return !seen.has(key) && seen.add(key);
+    });
+  };
+
+  // ---------- searches ----------
+  const rows = [];
+
+  async function runTasks(name, tasks, { mode = 'dates', bailIfUnsupported = false } = {}) {
+    if (!tasks.length) return true;
+    console.log(`%c${name}: ${tasks.length} searches`, 'font-weight:bold');
+    for (const [n, task] of tasks.entries()) {
+      const result = await request(mode, task.legs);
+      if (result.cached && result.currency) currency = result.currency;
+      task.result = result;
+      const added = task.collect(result.cells);
+      const best = added.length ? Math.min(...added.map(r => r.price)) : null;
+      const outcome = best != null ? `from ${money(best)}${task.describe ? task.describe(added) : ''}` : `no fares${result.error ? ` (${result.error})` : ''}`;
+      console.log(`[${name} ${n + 1}/${tasks.length}] ${task.label}: ${outcome}${result.cached ? ' (cached)' : ''}`);
+      const probe = Math.min(2, tasks.length - 1);
+      if (bailIfUnsupported && n === probe && tasks.slice(0, probe + 1).every(t => t.result.error)) {
+        console.warn(`${name}: the first ${probe + 1} searches all failed, so Delta's API probably doesn't offer these. Skipping the rest.`);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // A flexible-dates search whose 7×7 grid becomes rows of the given kind and airports.
+  const gridTask = (row, legs, label) => ({
+    legs,
+    label,
+    collect: cells => cells.map(([out, ret, price, stops]) => {
+      const r = { ...row, out, ret, price, stops };
+      rows.push(r);
+      return r;
+    }),
   });
+  const shiftLabel = ([o, r]) => (blockPairs.length > 1 ? ` [${addDays(o, -3)}…${addDays(o, 3)} / ${addDays(r, -3)}…${addDays(r, 3)}]` : '');
+  const roundTrip = (h, d, pair, suffix = shiftLabel(pair)) => gridTask(
+    { kind: 'RT', from: h, to: d, from2: d, to2: h }, [leg(h, d, pair[0]), leg(d, h, pair[1])], `${h} ⇄ ${d}${suffix}`);
+  const openJaw = (h, x, y, pair, suffix = shiftLabel(pair)) => gridTask(
+    { kind: 'OJ', from: h, to: x, from2: y, to2: h }, [leg(h, x, pair[0]), leg(y, h, pair[1])], `${h} → ${x} … ${y} → ${h}${suffix}`);
+
+  // Cheapest round-trip fare per airport on your dates.
+  const bestRoundTripBy = side => {
+    const best = {};
+    for (const r of rows) if (r.kind === 'RT' && inDates(r.out, r.ret)) best[r[side]] = Math.min(best[r[side]] ?? Infinity, r.price);
+    return best;
+  };
+  // Your N cheapest home airports (all of them if nothing is priced yet).
+  function topHomes() {
+    const best = bestRoundTripBy('from');
+    const ranked = homes.filter(h => best[h] != null).sort((a, b) => best[a] - best[b]);
+    return (ranked.length ? ranked : homes).slice(0, Math.max(1, CONFIG.exploreFromTopHomes || homes.length));
+  }
+  // The N cheapest airports per visit country so far (or the first N listed).
+  function pickGateways() {
+    const best = bestRoundTripBy('to');
+    const picked = {};
+    for (const country of tripCountries) {
+      const airports = Object.keys(countryOf).filter(a => countryOf[a] === country);
+      const priced = airports.filter(a => best[a] != null).sort((a, b) => best[a] - best[b]);
+      picked[country] = (priced.length ? priced : CONFIG.destinations[country]).slice(0, CONFIG.gatewaysPerCountry);
+    }
+    return picked;
+  }
+
+  const roundTripTasks = (fromList, toList) => fromList.flatMap(h => toList.flatMap(d => blockPairs.map(p => roundTrip(h, d, p))));
+
+  const openJawTasks = gateways => tripCountries.flatMap(inC => tripCountries.filter(c => c !== inC).flatMap(outC =>
+    homes.flatMap(h => gateways[inC].flatMap(x => gateways[outC].flatMap(y => blockPairs.map(p => openJaw(h, x, y, p)))))));
+
+  const oneWayTasks = (fromList, gateways) => {
+    const airports = Object.values(gateways).flat();
+    const outbound = fromList.flatMap(h => airports.flatMap(x => outCenters.map(o => gridTask(
+      { kind: 'OW-out', from: h, to: x, from2: null, to2: null }, [leg(h, x, o)],
+      `${h} → ${x} one-way${outCenters.length > 1 ? ` [${addDays(o, -3)}…${addDays(o, 3)}]` : ''}`))));
+    const inbound = airports.flatMap(x => fromList.flatMap(h => retCenters.map(r => gridTask(
+      { kind: 'OW-back', from: x, to: h, from2: null, to2: null }, [leg(x, h, r)],
+      `${x} → ${h} one-way${retCenters.length > 1 ? ` [${addDays(r, -3)}…${addDays(r, 3)}]` : ''}`))));
+    return [...outbound, ...inbound];
+  };
+
+  // Delta's own nearby-airports search around each top home airport and the cheapest
+  // airport of each visit country, on that round trip's best dates.
+  function nearbyTasks(fromList) {
+    const tasks = [];
+    for (const country of tripCountries) {
+      for (const h of fromList) {
+        let best = null;
+        for (const r of rows) {
+          if (r.kind === 'RT' && r.from === h && countryOf[r.to] === country && inDates(r.out, r.ret) && (!best || r.price < best.price)) best = r;
+        }
+        if (!best) continue;
+        tasks.push({
+          legs: [nearbyLeg(h, best.to, best.out), nearbyLeg(best.to, h, best.ret)],
+          label: `airports near ${h} ⇄ ${best.to}, ${best.out} → ${best.ret}`,
+          collect: cells => cells.map(([from, to, price]) => {
+            if (!countryOf[to]) {
+              countryOf[to] = country; // close enough: it is within 100 miles of an airport there
+              discovered.add(to);
+            }
+            if (!homes.includes(from) && !extraHomes.includes(from)) discovered.add(from);
+            const r = { kind: 'RT', from, to, from2: to, to2: from, out: best.out, ret: best.ret, price, stops: null };
+            rows.push(r);
+            return r;
+          }),
+          describe: added => ` (${[...new Set(added.map(r => r.from))].join('/')} → ${[...new Set(added.map(r => r.to))].join('/')})`,
+        });
+      }
+    }
+    return tasks;
+  }
+
+  // The same trip moved earlier or later by whole weeks, for the cheapest routes on your dates.
+  function otherWeekTasks() {
+    const shifts = (CONFIG.otherWeeks && CONFIG.otherWeeks.shifts) || [];
+    const best = bestPerRoute(buildTrips().filter(t => t.yourDates && t.strategy !== 'Two one-ways')).slice(0, CONFIG.otherWeeks.routes || 0);
+    return best.flatMap(t => shifts.map(k => {
+      const pair = [addDays(t.out, 7 * k), addDays(t.ret, 7 * k)];
+      const suffix = ` [${k > 0 ? '+' : ''}${k} wk: ${pair[0]} → ${pair[1]} ±3 days]`;
+      return t.strategy === 'Round trip' ? roundTrip(t.from, t.to, pair, suffix) : openJaw(t.from, t.to, t.from2, pair, suffix);
+    })).filter(task => task.legs[0].departureLocalTs.slice(0, 10) > isoDay(Date.now() + 3 * DAY));
+  }
+
+  // ---------- plan ----------
+  const plannedGateways = Object.fromEntries(tripCountries.map(c => [c, CONFIG.destinations[c].slice(0, CONFIG.gatewaysPerCountry)]));
+  const exploreHomes = homes.slice(0, Math.max(1, CONFIG.exploreFromTopHomes || homes.length));
+  const plan = {
+    'Round trips': CONFIG.searchRoundTrips ? roundTripTasks(homes, allDestinations).length : 0,
+    'More airports': roundTripTasks(exploreHomes, moreDestinations).length,
+    'Nearby airports': CONFIG.searchNearbyAirports ? exploreHomes.length * tripCountries.length : 0,
+    'Open-jaw': CONFIG.searchOpenJaw && tripCountries.length > 1 ? openJawTasks(plannedGateways).length : 0,
+    'One-ways': CONFIG.searchOneWays ? oneWayTasks(exploreHomes, plannedGateways).length : 0,
+    'More home airports': roundTripTasks(extraHomes, Object.values(plannedGateways).flat()).length,
+    'Other weeks': CONFIG.otherWeeks ? (CONFIG.otherWeeks.routes || 0) * ((CONFIG.otherWeeks.shifts || []).length) : 0,
+  };
+  const planned = Object.values(plan).reduce((a, b) => a + b, 0);
+  const avgSeconds = (CONFIG.delayMs[0] + CONFIG.delayMs[1]) / 2000 + 1.5;
+  console.log(`%cDelta fare finder: up to ${planned} searches (~${Math.ceil((planned * avgSeconds) / 60)} min if none are cached). `
+    + `Departing ${CONFIG.departDates.join('–')}, returning ${CONFIG.returnDates.join('–')}, `
+    + `${homes.join('/')} → ${allDestinations.join('/')}.`, 'font-weight:bold;font-size:13px');
+  console.log(Object.entries(plan).filter(([, n]) => n).map(([k, n]) => `${k}: ${n}`).join(' · '));
+  if (planned > CONFIG.maxRequests) {
+    console.error(`That's more than maxRequests (${CONFIG.maxRequests}). Narrow the dates/airports, turn off some of the extra searches, or raise maxRequests.`);
+    return;
+  }
+  if (CONFIG.departDates[0] < isoDay(Date.now())) console.warn('departDates starts in the past; those dates will come back empty.');
+
+  window.DELTA_FARE_STOP = false; // clear a stop left over from an earlier run
+  let haltedBy = null;
+  try {
+    if (CONFIG.searchRoundTrips) await runTasks('Round trips', roundTripTasks(homes, allDestinations));
+    const explore = topHomes();
+    await runTasks('More airports', roundTripTasks(explore, moreDestinations));
+    if (CONFIG.searchNearbyAirports) await runTasks('Nearby airports', nearbyTasks(explore), { mode: 'airport', bailIfUnsupported: true });
+    const gateways = pickGateways();
+    if (CONFIG.searchOpenJaw && tripCountries.length > 1) {
+      console.log(`Open-jaw gateways: ${JSON.stringify(gateways)}`);
+      await runTasks('Open-jaw', openJawTasks(gateways), { bailIfUnsupported: true });
+    }
+    if (CONFIG.searchOneWays) await runTasks('One-ways', oneWayTasks(explore, gateways));
+    await runTasks('More home airports', roundTripTasks(extraHomes, Object.values(gateways).flat()));
+    if (CONFIG.otherWeeks) await runTasks('Other weeks', otherWeekTasks());
+  } catch (e) {
+    if (!(e instanceof Halt)) throw e;
+    haltedBy = e.message;
+    console.warn(`Stopped early: ${e.message}. Ranking what was found so far; re-run later to continue (finished searches are cached).`);
+  }
+
+  // ---------- results ----------
+  const trips = buildTrips();
+  const onYourDates = trips.filter(t => t.yourDates);
+  const best = bestPerRoute(onYourDates);
 
   const howToBook = t => {
     if (t.strategy === 'Round trip') return `Round Trip ${t.from} → ${t.to}, depart ${t.out}, return ${t.ret}`;
@@ -508,35 +704,75 @@
     return;
   }
 
-  console.log(`%cCheapest by strategy (est. total includes ${money(CONFIG.hopCost)} per person per hop between ${tripCountries.join(' and ')}):`, 'font-weight:bold');
-  console.table(bestPerRoute.filter((t, i, all) => all.findIndex(x => x.strategy === t.strategy) === i).map(display));
+  if (best.length) {
+    console.log(`%cCheapest by strategy on your dates (est. total includes ${money(CONFIG.hopCost)} per person per hop between ${tripCountries.join(' and ')}):`, 'font-weight:bold');
+    console.table(best.filter((t, i, all) => all.findIndex(x => x.strategy === t.strategy) === i).map(display));
 
-  console.log(`%cTop ${CONFIG.showTop} routes (best dates for each):`, 'font-weight:bold');
-  console.table(bestPerRoute.slice(0, CONFIG.showTop).map(display));
+    console.log(`%cTop ${CONFIG.showTop} routes on your dates (best dates for each):`, 'font-weight:bold');
+    console.table(best.slice(0, CONFIG.showTop).map(display));
+  }
+
+  // Other weeks: only where moving the trip beats that route on your dates.
+  const yourBest = {};
+  for (const t of best) yourBest[`${t.strategy}|${t.route}`] = t.total;
+  const otherDates = bestPerRoute(trips.filter(t => !t.yourDates))
+    .filter(t => !(yourBest[`${t.strategy}|${t.route}`] <= t.total))
+    .slice(0, 10);
+  if (otherDates.length) {
+    console.log('%cCheaper if you can move the trip:', 'font-weight:bold');
+    console.table(otherDates.map(t => ({ ...display(t), 'vs your dates': yourBest[`${t.strategy}|${t.route}`] != null ? `−${money(yourBest[`${t.strategy}|${t.route}`] - t.total)}` : '' })));
+  }
+
+  const airportsTable = {};
+  for (const t of best) {
+    if (t.strategy !== 'Round trip' || airportsTable[t.to]) continue;
+    airportsTable[t.to] = {
+      country: countryOf[t.to] || '',
+      airfare: money(t.airfare),
+      'est. total': money(t.total),
+      from: t.from,
+      dates: `${t.out} → ${t.ret}`,
+      found: discovered.has(t.to) ? 'nearby search' : moreDestinations.includes(t.to) ? 'more airports' : '',
+    };
+  }
+  if (Object.keys(airportsTable).length) {
+    console.log('%cCheapest round trip to each European airport, on your dates:', 'font-weight:bold');
+    console.table(airportsTable);
+  }
 
   const matrix = {};
   for (const h of homes) {
     matrix[h] = {};
     for (const d of allDestinations) {
-      const best = trips.find(t => t.strategy === 'Round trip' && t.from === h && t.to === d);
-      matrix[h][d] = best ? money(best.airfare) : '—';
+      const t = best.find(x => x.strategy === 'Round trip' && x.from === h && x.to === d);
+      matrix[h][d] = t ? money(t.airfare) : '—';
     }
   }
-  if (trips.some(t => t.strategy === 'Round trip')) {
+  if (best.some(t => t.strategy === 'Round trip')) {
     console.log('%cCheapest round-trip airfare, home airport × destination:', 'font-weight:bold');
     console.table(matrix);
   }
 
-  console.log('%cHow to book the top 5 on delta.com:', 'font-weight:bold');
-  bestPerRoute.slice(0, 5).forEach((t, i) => console.log(`${i + 1}. ${money(t.total)} est. (${money(t.airfare)} airfare): ${howToBook(t)}`));
+  const otherHomes = [...extraHomes, ...[...discovered].filter(a => rows.some(r => r.from === a))]
+    .map(h => best.find(t => t.from === h))
+    .filter(Boolean);
+  if (otherHomes.length) {
+    console.log('%cBest trip from each other home airport (est. total includes the extra cost you set):', 'font-weight:bold');
+    console.table(otherHomes.map(t => ({ ...display(t), 'extra cost': money(homeCosts[t.from] || 0) })));
+  }
+  if (discovered.size) console.log(`Delta's nearby-airports search also turned up: ${[...discovered].join(', ')}.`);
+
+  console.log('%cHow to book on delta.com:', 'font-weight:bold');
+  best.slice(0, 5).forEach((t, i) => console.log(`${i + 1}. ${money(t.total)} est. (${money(t.airfare)} airfare): ${howToBook(t)}`));
+  otherDates.slice(0, 3).forEach(t => console.log(`   other dates: ${money(t.total)} est. (${money(t.airfare)} airfare): ${howToBook(t)}`));
   console.log('Prices are for the whole party, before seat/bag fees, and can change by the minute. Search the exact dates on delta.com to confirm.');
 
   const csvCell = v => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-  const columns = ['strategy', 'route', 'from', 'to', 'from2', 'to2', 'out', 'ret', 'nights', 'stops', 'airfare', 'hops', 'total'];
+  const columns = ['strategy', 'route', 'from', 'to', 'from2', 'to2', 'out', 'ret', 'nights', 'stops', 'airfare', 'hops', 'total', 'yourDates'];
   const csv = [columns.join(','), ...trips.map(t => columns.map(c => csvCell(t[c])).join(','))].join('\n');
 
-  window.deltaFares = { config: CONFIG, currency, rows, trips, bestPerRoute, csv };
-  console.log('Everything is in window.deltaFares (rows = raw fares, trips = every combination, bestPerRoute = table above).');
+  window.deltaFares = { config: CONFIG, currency, rows, trips, bestPerRoute: best, otherDates, discovered: [...discovered], csv };
+  console.log('Everything is in window.deltaFares (rows = raw fares, trips = every combination, bestPerRoute = your-dates table).');
 
   if (CONFIG.download) {
     const save = (name, text, type) => {
@@ -551,6 +787,6 @@
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
     save(`delta-trips-${stamp}.csv`, csv, 'text/csv');
     // Raw fares, for the Colab notebook's "analyze a console export" section.
-    save(`delta-fares-${stamp}.json`, JSON.stringify({ config: CONFIG, currency, rows }), 'application/json');
+    save(`delta-fares-${stamp}.json`, JSON.stringify({ config: CONFIG, currency, rows, countryOf }), 'application/json');
   }
 })();

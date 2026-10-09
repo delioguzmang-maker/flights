@@ -249,6 +249,25 @@ class NotebookTest(unittest.TestCase):
         self.assertEqual(list(trips['total']), [880, 890, 900])
         self.assertEqual(trips.iloc[0]['stops'], '?+0')
 
+    def test_console_v2_export(self):
+        """Exports from the console script carry extra airports, extra home airports and the
+        countries of airports its nearby-airports search found."""
+        fake = FakeDelta(self, status=403)
+        ns = self.run_cells(fake, SEARCH)
+        export_config = dict(ns['CONFIG'], moreAirports={'Netherlands': ['AMS']}, extraHomeAirports={'ATL': 100})
+        rows = [
+            {'kind': 'RT', 'from': 'CLT', 'to': 'AMS', 'from2': 'AMS', 'to2': 'CLT', 'out': '2026-12-15', 'ret': '2026-12-23', 'price': 600, 'stops': 1},
+            {'kind': 'RT', 'from': 'ATL', 'to': 'FCO', 'from2': 'FCO', 'to2': 'ATL', 'out': '2026-12-15', 'ret': '2026-12-23', 'price': 650, 'stops': 0},
+            {'kind': 'RT', 'from': 'GSO', 'to': 'SZG', 'from2': 'SZG', 'to2': 'GSO', 'out': '2026-12-15', 'ret': '2026-12-23', 'price': 705, 'stops': None},
+            # Another week (the console's "other weeks" search): outside your dates, so not ranked here.
+            {'kind': 'RT', 'from': 'CLT', 'to': 'FCO', 'from2': 'FCO', 'to2': 'CLT', 'out': '2026-11-24', 'ret': '2026-12-02', 'price': 400, 'stops': 1},
+        ]
+        self.uploads = {'delta-fares.json': json.dumps({'config': export_config, 'currency': 'USD', 'rows': rows, 'countryOf': {'SZG': 'Germany'}}).encode()}
+        self.run_cells(fake, EXPORT, config={'hopCost': 100}, ns=ns)
+        trips = ns['trips']
+        self.assertEqual([(t['to'], t['hops'], t['total']) for _, t in trips.iterrows()],
+                         [('AMS', 3, 900), ('SZG', 2, 905), ('FCO', 2, 950)])
+
     def test_too_many_searches_refused(self):
         fake = FakeDelta(self)
         ns = self.run_cells(fake, SEARCH, config={'departDates': ['2026-12-01', '2026-12-31'], 'returnDates': ['2027-01-01', '2027-01-31'], 'maxNights': 60})
