@@ -1,0 +1,10 @@
+# HAR captures contain cookies and personal data
+*.har
+
+# Files the notebook writes when run locally
+delta_fare_cache.json
+delta_fares.json
+delta_trips.csv
+
+__pycache__/
+.ipynb_checkpoints/

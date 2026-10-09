@@ -1,0 +1,1363 @@
+{
+ "note": "Recorded from delta.com flexible-dates search CHS<->MXP (HAR capture, 2026-10-09).",
+ "query": "query ($offerSearchCriteria: OfferSearchCriteriaInput!) {\n  gqlSearchOffers(offerSearchCriteria: $offerSearchCriteria) {\n    offerResponseId\n    gqlOffersSets {\n      offers {\n        offerId\n        additionalOfferProperties {\n          offered\n          soldOut\n          lowestFare\n          totalTripStopCnt\n          discountAvailable\n        }\n        offerPricing {\n          discountsApplied {\n            code\n            pct\n          }\n          originalTotalAmt {\n            currencyEquivalentPrice {\n              currencyAmt\n              roundedCurrencyAmt\n              formattedCurrencyAmt\n            }\n            milesEquivalentPrice {\n              mileCnt\n            }\n          }\n          totalAmt {\n            currencyEquivalentPrice {\n              currencyAmt\n              roundedCurrencyAmt\n              formattedCurrencyAmt\n            }\n            milesEquivalentPrice {\n              mileCnt\n            }\n          }\n          promotionalPrices {\n            code\n            pct\n            price {\n              milesEquivalentPrice {\n                mileCnt\n              }\n              currencyEquivalentPrice {\n                currencyAmt\n                roundedCurrencyAmt\n                formattedCurrencyAmt\n              }\n            }\n          }\n        }\n      }\n      itineraryDepartureDate\n    }\n    offerDataList {\n      pricingOptions {\n        pricingOptionDetail {\n          currencyCode\n        }\n      }\n      flexReturnDates\n      responseProperties {\n        tripTypeText\n        discountInfo {\n          discountPct\n          discountTypeCode\n          nonDiscountedOffersAvailable\n        }\n        promotionsInfo {\n          promotionalCode\n          promotionalPct\n        }\n      }\n    }\n  }\n}",
+ "request": {
+  "offerSearchCriteria": {
+   "productGroups": [
+    {
+     "productCategoryCode": "FLIGHTS"
+    }
+   ],
+   "customers": [
+    {
+     "passengerTypeCode": "ADT",
+     "passengerId": "1"
+    }
+   ],
+   "offersCriteria": {
+    "resultsPageNum": 4,
+    "pricingCriteria": {
+     "priceableIn": [
+      "CURRENCY"
+     ]
+    },
+    "preferences": {
+     "nonStopOnly": false,
+     "refundableOnly": false,
+     "excludeBrandTypes": []
+    },
+    "flightRequestCriteria": {
+     "sortByBrandId": "MAIN",
+     "searchOriginDestination": [
+      {
+       "departureLocalTs": "2026-12-17T00:00:00",
+       "destinations": [
+        {
+         "airportCode": "MXP"
+        }
+       ],
+       "origins": [
+        {
+         "airportCode": "CHS"
+        }
+       ],
+       "calenderDateRequest": {
+        "daysBeforeCnt": 3,
+        "daysAfterCnt": 3
+       }
+      },
+      {
+       "departureLocalTs": "2026-12-25T00:00:00",
+       "destinations": [
+        {
+         "airportCode": "CHS"
+        }
+       ],
+       "origins": [
+        {
+         "airportCode": "MXP"
+        }
+       ],
+       "calenderDateRequest": {
+        "daysBeforeCnt": 3,
+        "daysAfterCnt": 3
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "response": {
+  "data": {
+   "gqlSearchOffers": {
+    "offerResponseId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13",
+    "gqlOffersSets": [
+     {
+      "offers": [
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-1",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": true,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 831.59,
+            "roundedCurrencyAmt": 832,
+            "formattedCurrencyAmt": "831.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-2",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1003.49,
+            "roundedCurrencyAmt": 1004,
+            "formattedCurrencyAmt": "1003.49"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-3",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": true,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 831.59,
+            "roundedCurrencyAmt": 832,
+            "formattedCurrencyAmt": "831.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-4",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 841.49,
+            "roundedCurrencyAmt": 842,
+            "formattedCurrencyAmt": "841.49"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-5",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1331.89,
+            "roundedCurrencyAmt": 1332,
+            "formattedCurrencyAmt": "1331.89"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-6",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1336.89,
+            "roundedCurrencyAmt": 1337,
+            "formattedCurrencyAmt": "1336.89"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-7",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1223.59,
+            "roundedCurrencyAmt": 1224,
+            "formattedCurrencyAmt": "1223.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       }
+      ],
+      "itineraryDepartureDate": "2026-12-14"
+     },
+     {
+      "offers": [
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-8",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 876.09,
+            "roundedCurrencyAmt": 877,
+            "formattedCurrencyAmt": "876.09"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-9",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1047.99,
+            "roundedCurrencyAmt": 1048,
+            "formattedCurrencyAmt": "1047.99"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-10",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 876.09,
+            "roundedCurrencyAmt": 877,
+            "formattedCurrencyAmt": "876.09"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-11",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 885.99,
+            "roundedCurrencyAmt": 886,
+            "formattedCurrencyAmt": "885.99"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-12",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1376.39,
+            "roundedCurrencyAmt": 1377,
+            "formattedCurrencyAmt": "1376.39"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-13",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1381.39,
+            "roundedCurrencyAmt": 1382,
+            "formattedCurrencyAmt": "1381.39"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-14",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1268.09,
+            "roundedCurrencyAmt": 1269,
+            "formattedCurrencyAmt": "1268.09"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       }
+      ],
+      "itineraryDepartureDate": "2026-12-15"
+     },
+     {
+      "offers": [
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-15",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 872.59,
+            "roundedCurrencyAmt": 873,
+            "formattedCurrencyAmt": "872.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-16",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1044.49,
+            "roundedCurrencyAmt": 1045,
+            "formattedCurrencyAmt": "1044.49"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-17",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 872.59,
+            "roundedCurrencyAmt": 873,
+            "formattedCurrencyAmt": "872.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-18",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 882.49,
+            "roundedCurrencyAmt": 883,
+            "formattedCurrencyAmt": "882.49"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-19",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1372.89,
+            "roundedCurrencyAmt": 1373,
+            "formattedCurrencyAmt": "1372.89"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-20",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1377.89,
+            "roundedCurrencyAmt": 1378,
+            "formattedCurrencyAmt": "1377.89"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-21",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1264.59,
+            "roundedCurrencyAmt": 1265,
+            "formattedCurrencyAmt": "1264.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       }
+      ],
+      "itineraryDepartureDate": "2026-12-16"
+     },
+     {
+      "offers": [
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-22",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1286.09,
+            "roundedCurrencyAmt": 1287,
+            "formattedCurrencyAmt": "1286.09"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-23",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1470.99,
+            "roundedCurrencyAmt": 1471,
+            "formattedCurrencyAmt": "1470.99"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-24",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1286.09,
+            "roundedCurrencyAmt": 1287,
+            "formattedCurrencyAmt": "1286.09"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-25",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1295.99,
+            "roundedCurrencyAmt": 1296,
+            "formattedCurrencyAmt": "1295.99"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-26",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1786.39,
+            "roundedCurrencyAmt": 1787,
+            "formattedCurrencyAmt": "1786.39"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-27",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1791.39,
+            "roundedCurrencyAmt": 1792,
+            "formattedCurrencyAmt": "1791.39"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-28",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1678.09,
+            "roundedCurrencyAmt": 1679,
+            "formattedCurrencyAmt": "1678.09"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       }
+      ],
+      "itineraryDepartureDate": "2026-12-17"
+     },
+     {
+      "offers": [
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-29",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1435.59,
+            "roundedCurrencyAmt": 1436,
+            "formattedCurrencyAmt": "1435.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-30",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1620.49,
+            "roundedCurrencyAmt": 1621,
+            "formattedCurrencyAmt": "1620.49"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-31",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1435.59,
+            "roundedCurrencyAmt": 1436,
+            "formattedCurrencyAmt": "1435.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-32",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1445.49,
+            "roundedCurrencyAmt": 1446,
+            "formattedCurrencyAmt": "1445.49"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-33",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1935.89,
+            "roundedCurrencyAmt": 1936,
+            "formattedCurrencyAmt": "1935.89"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-34",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1940.89,
+            "roundedCurrencyAmt": 1941,
+            "formattedCurrencyAmt": "1940.89"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-35",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1827.59,
+            "roundedCurrencyAmt": 1828,
+            "formattedCurrencyAmt": "1827.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       }
+      ],
+      "itineraryDepartureDate": "2026-12-18"
+     },
+     {
+      "offers": [
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-36",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1544.09,
+            "roundedCurrencyAmt": 1545,
+            "formattedCurrencyAmt": "1544.09"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-37",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1553.99,
+            "roundedCurrencyAmt": 1554,
+            "formattedCurrencyAmt": "1553.99"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-38",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1544.09,
+            "roundedCurrencyAmt": 1545,
+            "formattedCurrencyAmt": "1544.09"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-39",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1553.99,
+            "roundedCurrencyAmt": 1554,
+            "formattedCurrencyAmt": "1553.99"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-40",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1869.39,
+            "roundedCurrencyAmt": 1870,
+            "formattedCurrencyAmt": "1869.39"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-41",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1874.39,
+            "roundedCurrencyAmt": 1875,
+            "formattedCurrencyAmt": "1874.39"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-42",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1761.09,
+            "roundedCurrencyAmt": 1762,
+            "formattedCurrencyAmt": "1761.09"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       }
+      ],
+      "itineraryDepartureDate": "2026-12-19"
+     },
+     {
+      "offers": [
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-43",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1422.49,
+            "roundedCurrencyAmt": 1423,
+            "formattedCurrencyAmt": "1422.49"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-44",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1422.49,
+            "roundedCurrencyAmt": 1423,
+            "formattedCurrencyAmt": "1422.49"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-45",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1412.59,
+            "roundedCurrencyAmt": 1413,
+            "formattedCurrencyAmt": "1412.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-46",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1422.49,
+            "roundedCurrencyAmt": 1423,
+            "formattedCurrencyAmt": "1422.49"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-47",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1737.89,
+            "roundedCurrencyAmt": 1738,
+            "formattedCurrencyAmt": "1737.89"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-48",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 2,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1717.89,
+            "roundedCurrencyAmt": 1718,
+            "formattedCurrencyAmt": "1717.89"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       },
+       {
+        "offerId": "eae4869d-7929-4d60-b53e-f5cf46b6fd13-FL-49",
+        "additionalOfferProperties": {
+         "offered": null,
+         "soldOut": null,
+         "lowestFare": false,
+         "totalTripStopCnt": 1,
+         "discountAvailable": false
+        },
+        "offerPricing": [
+         {
+          "discountsApplied": null,
+          "originalTotalAmt": null,
+          "totalAmt": {
+           "currencyEquivalentPrice": {
+            "currencyAmt": 1604.59,
+            "roundedCurrencyAmt": 1605,
+            "formattedCurrencyAmt": "1604.59"
+           },
+           "milesEquivalentPrice": null
+          },
+          "promotionalPrices": []
+         }
+        ]
+       }
+      ],
+      "itineraryDepartureDate": "2026-12-20"
+     }
+    ],
+    "offerDataList": {
+     "pricingOptions": [
+      {
+       "pricingOptionDetail": {
+        "currencyCode": "USD"
+       }
+      }
+     ],
+     "flexReturnDates": [
+      "2026-12-22",
+      "2026-12-23",
+      "2026-12-24",
+      "2026-12-25",
+      "2026-12-26",
+      "2026-12-27",
+      "2026-12-28"
+     ],
+     "responseProperties": {
+      "tripTypeText": "ROUND_TRIP",
+      "discountInfo": null,
+      "promotionsInfo": []
+     }
+    }
+   }
+  }
+ }
+}
