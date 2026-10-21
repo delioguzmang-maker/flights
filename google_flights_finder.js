@@ -31,7 +31,7 @@
  *   2. Open DevTools (F12, or Cmd+Option+J on a Mac) and pick the Console tab.
  *   3. Change CONFIG below if you want, paste this whole file and press Enter.
  *      The browser may first ask you to type "allow pasting".
- *   4. Leave the tab open. Progress prints as it goes (the default plan is ~135 searches,
+ *   4. Leave the tab open. Progress prints as it goes (the default plan is ~140 searches,
  *      about 15 minutes). Results print as tables and download as CSV + JSON.
  *
  * Stop early:  window.GF_FARE_STOP = true   (the results so far are still ranked)
@@ -41,7 +41,7 @@
 (async () => {
   'use strict';
 
-  const CONFIG = Object.assign({
+  const CONFIG = {
     // Searched together in the date-grid searches (Google allows up to 7 airports per side).
     homeAirports: ['CAE', 'CLT', 'GSP', 'CHS'],
     // Searched one at a time on the cheapest dates, so each gets its own price.
@@ -123,7 +123,14 @@
     cacheHours: 6,
     showTop: 25,
     download: true,
-  }, window.GF_FARE_CONFIG || {});
+  };
+  // Settings in window.GF_FARE_CONFIG win. drive is merged, so { drive: { dropOff: true } }
+  // keeps the airport table; drive: false turns drive and parking costs off.
+  const overrides = window.GF_FARE_CONFIG || {};
+  const defaultDrive = CONFIG.drive;
+  Object.assign(CONFIG, overrides);
+  if (overrides.drive === false || overrides.drive === null) CONFIG.drive = { airports: {} };
+  else if (overrides.drive) CONFIG.drive = { ...defaultDrive, ...overrides.drive, airports: { ...defaultDrive.airports, ...(overrides.drive.airports || {}) } };
 
   const CACHE_KEY = 'gfFareFinder.v2';
   const TRIP = { roundTrip: 1, oneWay: 2, multiCity: 3 };
@@ -366,10 +373,12 @@
     console.log(`%c${name}: ${tasks.length} searches`, 'font-weight:bold');
     for (const [n, task] of tasks.entries()) {
       const result = await search(task.trip, task.legs);
-      const added = result.itineraries.map(it => ({ kind: task.kind, group: task.group, out: task.out, ret: task.ret ?? null, ...task.extra, ...it }));
+      // Searches with all your home airports on the home side (not one airport, not a US hub).
+      const fromHomes = [task.legs[0].from, task.legs[task.legs.length - 1].to].some(list => list.join() === homes.join());
+      const added = result.itineraries.map(it => ({ kind: task.kind, group: task.group, out: task.out, ret: task.ret ?? null, fromHomes, ...task.extra, ...it }));
       rows.push(...added);
-      // Date hints only from searches between home and Europe (not the US-hub legs).
-      if (['RT', 'OW-out', 'OW-back'].includes(task.kind)) for (const h of result.hints) hints.push({ kind: task.kind, group: task.group, ...h });
+      // Date hints only from those searches between home and Europe.
+      if (fromHomes && ['RT', 'OW-out', 'OW-back'].includes(task.kind)) for (const h of result.hints) hints.push({ kind: task.kind, group: task.group, ...h });
       task.rows = added;
       const best = result.itineraries[0];
       console.log(`[${name} ${n + 1}/${tasks.length}] ${task.label}: ${best ? `from ${money(best.price)} (${best.from} → ${best.to}, ${best.airlines})` : `no fares (${result.error})`}${result.cached ? ' (cached)' : ''}`);
@@ -498,7 +507,7 @@
     'Round trips': datePairs.length * mainGroups.length,
     'More places': moreGroups.length * nPairs,
     'Each home airport': eachHome.length * Math.min(2, groups.length),
-    'Via US hubs': (CONFIG.usHubs || []).length ? Math.min(2, groups.length) * 3 : 0,
+    'Via US hubs': (CONFIG.usHubs || []).length ? Math.min(2, groups.length) * 5 : 0,
     'One-ways': CONFIG.searchOneWays ? (departDays.length + returnDays.length) * mainGroups.length : 0,
     'Other weeks': Math.min(2, groups.length) * (CONFIG.otherWeeks || []).length,
   };
@@ -531,23 +540,27 @@
     await runTasks('Each home airport', bestCombos(2, true).flatMap(({ group, pair }) => eachHome.map(h =>
       roundTripTask('RT', group, [h], pair, `${pairLabel(...pair)}  ${h} ⇄ ${group.name}`))));
 
-    // 4. Two tickets through a US hub: the transatlantic round trip from any hub, then a
-    //    domestic round trip from home to the two cheapest hubs it found.
+    // 4. Two tickets through a US hub: find the cheapest hubs with one search from all of
+    //    them, re-price the two cheapest on their own (so you fly back to the same hub), then
+    //    a domestic round trip from home to each.
     if ((CONFIG.usHubs || []).length) {
-      const hubTasks = bestCombos(2, true).map(({ group, pair }) =>
-        roundTripTask('HUB', group, CONFIG.usHubs, pair, `${pairLabel(...pair)}  US hubs ⇄ ${group.name}`));
-      await runTasks('Via US hubs', hubTasks);
+      const scans = bestCombos(2, true).map(({ group, pair }) =>
+        roundTripTask('HUBSCAN', group, CONFIG.usHubs, pair, `${pairLabel(...pair)}  US hubs ⇄ ${group.name}`));
+      await runTasks('Via US hubs', scans);
+      const hubTasks = [];
       const posTasks = [];
-      for (const task of hubTasks) {
-        for (const hub of cheapestBy(task.rows || [], r => r.from).sort((a, b) => a.price - b.price).slice(0, 2).map(r => r.from)) {
-          if (posTasks.some(p => p.legs[0].to[0] === hub && p.out === task.out && p.ret === task.ret)) continue;
+      for (const scan of scans) {
+        for (const hub of cheapestBy(scan.rows || [], r => r.from).sort((a, b) => a.price - b.price).slice(0, 2).map(r => r.from)) {
+          hubTasks.push(roundTripTask('HUB', groupByName[scan.group], [hub], [scan.out, scan.ret], `${pairLabel(scan.out, scan.ret)}  ${hub} ⇄ ${scan.group}`));
+          if (posTasks.some(p => p.legs[0].to[0] === hub && p.out === scan.out && p.ret === scan.ret)) continue;
           posTasks.push({
-            kind: 'POS', group: task.group, out: task.out, ret: task.ret, trip: TRIP.roundTrip,
-            legs: [{ date: task.out, from: homes, to: [hub] }, { date: task.ret, from: [hub], to: homes }],
-            label: `${pairLabel(task.out, task.ret)}  home ⇄ ${hub} (to catch the flight to ${task.group})`,
+            kind: 'POS', group: scan.group, out: scan.out, ret: scan.ret, trip: TRIP.roundTrip,
+            legs: [{ date: scan.out, from: homes, to: [hub] }, { date: scan.ret, from: [hub], to: homes }],
+            label: `${pairLabel(scan.out, scan.ret)}  home ⇄ ${hub} (to catch the flight to ${scan.group})`,
           });
         }
       }
+      await runTasks('Via US hubs: from each hub', hubTasks);
       await runTasks('Via US hubs: getting to the hub', posTasks);
     }
 
@@ -622,8 +635,10 @@
   if (hubTrips.length) {
     console.log(`%cTwo tickets through a US hub (at least ${CONFIG.hubConnectionHours}h to connect on the way out; check the way back too):`, 'font-weight:bold');
     console.table(hubTrips.slice(0, 10).map(t => ({ ...display(t), times: t.times })));
-  } else if (rows.some(r => r.kind === 'HUB')) {
+  } else if (rows.some(r => r.kind === 'HUB') && rows.some(r => r.kind === 'POS')) {
     console.log(`No US-hub combination left at least ${CONFIG.hubConnectionHours}h to connect.`);
+  } else if (rows.some(r => r.kind === 'HUBSCAN')) {
+    console.log('The US-hub searches didn\'t finish or found no flights to the hub; re-run to complete them (finished searches are cached).');
   }
 
   const grid = {};
@@ -666,14 +681,24 @@
   // (or round-trip) fares there, on the dates of your best round trip.
   const multiCity = [];
   if (visitGroups.length > 1 && CONFIG.multiCityLinks > 0 && best.length) {
+    const dates = best.find(t => t.strategy === 'Round trip') || best[0];
+    // Score with fares from your home airports on these dates (one-ways, or half a round
+    // trip); for an airport with none, any fare from your home airports on your dates.
     const priceInto = {};
     const priceOutOf = {};
-    for (const r of rows) {
-      if (r.kind === 'OW-out' || r.kind === 'RT') priceInto[r.to] = Math.min(priceInto[r.to] ?? Infinity, r.kind === 'RT' ? r.price / 2 : r.price);
-      if (r.kind === 'OW-back') priceOutOf[r.from] = Math.min(priceOutOf[r.from] ?? Infinity, r.price);
-      if (r.kind === 'RT') priceOutOf[r.to] = Math.min(priceOutOf[r.to] ?? Infinity, r.price / 2);
+    const looseInto = {};
+    const looseOutOf = {};
+    const keep = (map, airport, price) => { map[airport] = Math.min(map[airport] ?? Infinity, price); };
+    for (const r of rows.filter(x => x.fromHomes)) {
+      const onDates = r.kind === 'OW-back' ? r.out === dates.ret : r.out === dates.out && (r.kind !== 'RT' || r.ret === dates.ret);
+      const inYourDates = r.kind === 'RT' ? yourDates(r.out, r.ret) : inRange(r.out, r.kind === 'OW-back' ? CONFIG.returnDates : CONFIG.departDates);
+      if (!inYourDates) continue;
+      if (r.kind === 'OW-out' || r.kind === 'RT') keep(onDates ? priceInto : looseInto, r.to, r.kind === 'RT' ? r.price / 2 : r.price);
+      if (r.kind === 'OW-back') keep(onDates ? priceOutOf : looseOutOf, r.from, r.price);
+      if (r.kind === 'RT') keep(onDates ? priceOutOf : looseOutOf, r.to, r.price / 2);
     }
-    const dates = best.find(t => t.strategy === 'Round trip') || best[0];
+    for (const [a, p] of Object.entries(looseInto)) if (priceInto[a] == null) priceInto[a] = p;
+    for (const [a, p] of Object.entries(looseOutOf)) if (priceOutOf[a] == null) priceOutOf[a] = p;
     const cheapest = (airports, prices) => airports.filter(a => prices[a] != null).sort((a, b) => prices[a] - prices[b]).slice(0, 2);
     for (const a of visitGroups) {
       for (const b of visitGroups.filter(x => x !== a)) {
@@ -690,7 +715,7 @@
     multiCity.sort((p, q) => p.score - q.score);
     if (multiCity.length) {
       console.log('%cMulti-city searches worth opening by hand (one hop fewer than a round trip; Google only prices these in the page):', 'font-weight:bold');
-      multiCity.slice(0, CONFIG.multiCityLinks).forEach((m, i) => console.log(`${i + 1}. ${m.route}, ${m.depart} → ${m.return} (one-ways there ≈ ${money(m.score)})\n   ${m.link}`));
+      multiCity.slice(0, CONFIG.multiCityLinks).forEach((m, i) => console.log(`${i + 1}. ${m.route}, ${m.depart} → ${m.return} (score ≈ ${money(m.score)}: one-ways, or half a round trip, to and from those airports)\n   ${m.link}`));
     }
   }
 

@@ -20,7 +20,7 @@ Each option is ranked by its **estimated total = airfare + drive & parking + hop
 | Airlines | Delta and partners (Air France, KLM, Virgin, ITA…) | Every airline Google Flights shows (American, United, Air Canada, JetBlue, Lufthansa, TAP, budget carriers…) |
 | One search covers | one home airport → one European airport, 7 × 7 departure/return dates | several home airports → up to 7 European airports, one date pair |
 | Multi-city prices | yes | no (Google only prices these inside its own page code); it prints ready-made multi-city links to check by hand |
-| Default plan | ~250 searches, ~15 min | ~135 searches, ~15 min |
+| Default plan | ~250 searches, ~15 min | ~140 searches, ~15 min |
 
 Both work in Chrome, Edge and Firefox. Run both: Delta's grid is the fastest way to sweep dates, and Google catches cheaper airlines Delta doesn't sell.
 
@@ -91,11 +91,11 @@ When it finishes you get:
 - The home airport × destination matrix (airfare), and **how to book** the best options on delta.com.
 - Two downloads: `delta-trips-….csv` (every combination, with `driveAndPark` and `yourDates` columns) and `delta-fares-….json` (raw fares, which the notebook can analyse). If the browser asks to allow multiple downloads, allow it. If the JSON still doesn't arrive, type `copy(JSON.stringify(deltaFares.export))` in the console and paste it into a file. Everything is also in `window.deltaFares`.
 
-Stop early with `window.DELTA_FARE_STOP = true`; what was found so far still gets ranked. The script also stops by itself after 5 failed searches in a row, in case Delta starts blocking.
+Stop early with `window.DELTA_FARE_STOP = true`; what was found so far still gets ranked. A phase whose first 3 searches all fail is skipped. The script also stops by itself after 5 failed searches in a row, in case Delta starts blocking.
 
 Searches are cached in the browser for 6 hours, so a re-run skips what's already fetched. Failed searches aren't cached, so a re-run retries them.
 
-To skip a phase, set `moreAirports: {}`, `searchNearbyAirports: false`, `extraHomeAirports: []` or `otherWeeks: false`. To change settings without editing the file, set e.g. `window.DELTA_FARE_CONFIG = { hopCost: 60 }` before pasting.
+To skip a phase, set `moreAirports: {}`, `searchNearbyAirports: false`, `extraHomeAirports: []` or `otherWeeks: false`. To change settings without editing the file, set e.g. `window.DELTA_FARE_CONFIG = { hopCost: 60, drive: { dropOff: true } }` before pasting. `drive` settings are merged with the airport table, and `drive: false` turns drive and parking costs off.
 
 ## Google Flights script
 
@@ -109,7 +109,7 @@ It searches in this order:
 | Round trips | 60 | CAE/CLT/GSP/CHS together ⇄ Germany, Italy and "Other hubs" (LIS, MAD, BCN, AMS, CDG, DUB, ZRH), for every departure (Dec 12–16) × return (Dec 21–24) |
 | More places | 15 | 5 more groups on the 3 cheapest date pairs: more German airports, more Italian airports (LIN, BGY, TRN, VRN…), Portugal/Spain/France (OPO, FAO, AGP, ORY, NCE…), UK/Ireland/Iceland (LHR, LGW, MAN, KEF…) and Central Europe (VIE, PRG, BUD, WAW…). A group named after a country you're visiting ("More Italy") counts as that country. |
 | Each home airport | 20 | CAE, CLT, GSP, CHS, AGS, SAV, ATL, MYR, AVL and RDU one at a time, on the two cheapest groups. Google's results page only lists its top few flights, so this is the fair comparison between airports. |
-| Via US hubs | ~6 | two separate tickets: a transatlantic round trip from JFK, EWR, BOS, IAD, PHL, MCO or MIA, plus a domestic round trip from home to that hub. The script only pairs flights that leave at least 3 hours (`hubConnectionHours`) to connect on the way out; check the way back yourself. If the first flight is late, the second airline doesn't have to rebook you. |
+| Via US hubs | ~10 | two separate tickets: a transatlantic round trip from a hub (one search across JFK, EWR, BOS, IAD, PHL, MCO and MIA finds the two cheapest, which are then re-priced on their own so you fly back to the same hub), plus a domestic round trip from home to that hub. The script only pairs flights that leave at least 3 hours (`hubConnectionHours`) to connect on the way out; check the way back yourself. If the first flight is late, the second airline doesn't have to rebook you. |
 | One-ways | 27 | separate one-way tickets each way, where budget transatlantic airlines show up |
 | Other weeks | 8 | the two cheapest trips moved 1 and 2 weeks earlier and later |
 

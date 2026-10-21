@@ -271,6 +271,7 @@ class NotebookTest(unittest.TestCase):
         # ATL 215 mi + 9 × $14 = $172; GSO has no drive figures, so nothing is added.
         self.assertEqual([(t['to'], t['hops'], t['driveAndPark'], t['total']) for _, t in trips.iterrows()],
                          [('SZG', 2, 0, 905), ('FCO', 2, 172, 1022), ('AMS', 3, 146, 1046)])
+        self.assertTrue(any('No drive/parking figures for GSO' in line for line in self.printed))
 
     def test_blocked_run_all_does_not_stall(self):
         """When Delta refuses Colab, step 4 explains why and the download cell doesn't crash."""

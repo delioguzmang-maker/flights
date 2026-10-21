@@ -32,7 +32,7 @@
 (async () => {
   'use strict';
 
-  const CONFIG = Object.assign({
+  const CONFIG = {
     // Airports you can leave from and come home to, searched for every route.
     homeAirports: ['CAE', 'CLT', 'GSP', 'CHS'],
 
@@ -123,7 +123,14 @@
     cacheHours: 6,
     showTop: 25,
     download: true,
-  }, window.DELTA_FARE_CONFIG || {});
+  };
+  // Settings in window.DELTA_FARE_CONFIG win. drive is merged, so { drive: { dropOff: true } }
+  // keeps the airport table; drive: false turns drive and parking costs off.
+  const overrides = window.DELTA_FARE_CONFIG || {};
+  const defaultDrive = CONFIG.drive;
+  Object.assign(CONFIG, overrides);
+  if (overrides.drive === false || overrides.drive === null) CONFIG.drive = { airports: {} };
+  else if (overrides.drive) CONFIG.drive = { ...defaultDrive, ...overrides.drive, airports: { ...defaultDrive.airports, ...(overrides.drive.airports || {}) } };
 
   const OFFERS_URL = 'https://offer-api-prd.delta.com/prd/rm-offer-gql';
   const CALLBACK_URL = 'https://offer-api-prd.delta.com/prd/callback/';
@@ -453,7 +460,7 @@
       // Errors with a Delta code (e.g. ROF4002_404: no service) are answers worth caching;
       // anything else (HTTP 500, a bare GraphQL error, an empty body) may work next time.
       if (err.code !== CALLBACK_CODE || !err.callbackId) return { cells: [], error: err.code || err.message || 'empty response', transient: !err.code };
-      if (polls === 10) return { cells: [], error: 'gave up waiting for callback', transient: true };
+      if (polls === 10) return { cells: [], error: 'gave up waiting for callback', transient: true, timedOut: true };
       await sleep(Math.max(1, err.callbackInSecs) * 1000);
       json = await http(CALLBACK_URL + encodeURIComponent(err.callbackId), { headers: { Authorization: 'GUEST' } });
     }
@@ -491,7 +498,7 @@
     requests++;
     const result = await fetchOffers(mode, legs);
     if (result.transient) {
-      if (++failuresInARow >= 5) throw new Halt('the last 5 searches all failed; Delta may be blocking this browser for now. Wait a while and re-run');
+      failuresInARow++;
     } else {
       failuresInARow = 0;
       cache[key] = { t: Date.now(), currency, cells: result.cells, error: result.error };
@@ -576,10 +583,15 @@
       const best = added.length ? Math.min(...added.map(r => r.price)) : null;
       const outcome = best != null ? `from ${money(best)}${task.describe ? task.describe(added) : ''}` : `no fares${result.error ? ` (${result.error})` : ''}`;
       console.log(`[${name} ${n + 1}/${tasks.length}] ${task.label}: ${outcome}${result.cached ? ' (cached)' : ''}`);
+      // A phase whose first 3 searches all fail (time-outs aside) isn't offered: skip it.
       const probe = Math.min(2, tasks.length - 1);
-      if (bailIfUnsupported && n === probe && tasks.slice(0, probe + 1).every(t => t.result.error && !t.result.transient)) {
+      if (bailIfUnsupported && n === probe && tasks.slice(0, probe + 1).every(t => t.result.error && !t.result.timedOut)) {
         console.warn(`${name}: the first ${probe + 1} searches all failed, so Delta's API probably doesn't offer these. Skipping the rest.`);
+        failuresInARow = 0;
         return false;
+      }
+      if (failuresInARow >= 5) {
+        throw new Halt(`the last 5 searches failed (now in "${name}"); Delta may be blocking this browser for now. Wait a while and re-run`);
       }
     }
     return true;
@@ -726,6 +738,10 @@
     return;
   }
   if (CONFIG.departDates[0] < isoDay(Date.now())) console.warn('departDates starts in the past; those dates will come back empty.');
+  const noDriveData = [...homes, ...extraHomes].filter(a => !(CONFIG.drive?.airports || {})[a]);
+  if (noDriveData.length && Object.keys(CONFIG.drive?.airports || {}).length) {
+    console.warn(`No drive/parking figures for ${noDriveData.join(', ')}: their trips are ranked as if getting there were free. Add them to drive.airports.`);
+  }
   const typicalNights = Math.max(0, nightsBetween(CONFIG.departDates[0], CONFIG.returnDates[0]));
   console.log(`Drive + parking for a ${typicalNights}-night trip: ${[...homes, ...extraHomes].map(a => `${a} ${money(groundCost(a, typicalNights))}`).join(' · ')}`);
 

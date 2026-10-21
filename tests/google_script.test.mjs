@@ -192,9 +192,13 @@ test('default plan: grid, more places, each home airport, US hubs, one-ways, oth
   assert.deepEqual(each.map(s => s.legs[0].from.join()), [...EACH_HOME, ...EACH_HOME]);
   assert.deepEqual([...new Set(each.map(s => s.legs[0].to[0]))].sort(), ['LIN', 'OPO']);
   assert.ok(each.every(s => s.legs[1].to.length === 1 && s.legs[1].to[0] === s.legs[0].from[0]), 'come home to the same airport');
-  // 4. US hubs: transatlantic from the 7 hubs, then home ⇄ the two cheapest hubs found.
+  // 4. US hubs: one search from all 7 hubs per group, then the two cheapest hubs re-priced on
+  //    their own (back to the same hub), then home ⇄ each of those hubs.
   const hubs = searches.filter(s => s.legs[0].from.join() === US_HUBS.join());
   assert.equal(hubs.length, 2);
+  const singleHub = searches.filter(s => s.legs[0].from.length === 1 && US_HUBS.includes(s.legs[0].from[0]));
+  assert.equal(singleHub.length, 4);
+  assert.ok(singleHub.every(s => s.legs[1].to.length === 1 && s.legs[1].to[0] === s.legs[0].from[0]), 'back to the same hub');
   const positioning = searches.filter(s => s.legs[0].from.join() === HOMES.join() && s.legs[0].to.length === 1 && US_HUBS.includes(s.legs[0].to[0]));
   // Two cheapest hubs per hub search, shared when both groups' best dates are the same.
   assert.equal(positioning.length, 2 * new Set(hubs.map(s => `${s.legs[0].date}|${s.legs[1].date}`)).size);
@@ -202,7 +206,7 @@ test('default plan: grid, more places, each home airport, US hubs, one-ways, oth
   assert.equal(searches.filter(s => s.trip === 2).length, (5 + 4) * 3);
   const shifted = searches.filter(s => s.legs[0].date < '2026-12-12' || s.legs[0].date > '2026-12-16').filter(s => s.trip === 1);
   assert.equal(shifted.length, 2 * 4);
-  assert.equal(sb.calls.length, 60 + 15 + 20 + 2 + positioning.length + 27 + 8);
+  assert.equal(sb.calls.length, 60 + 15 + 20 + 2 + 4 + positioning.length + 27 + 8);
 
   // Every total = airfare + drive & parking for the home airport + hops.
   for (const t of trips) {
@@ -241,6 +245,31 @@ test('default plan: grid, more places, each home airport, US hubs, one-ways, oth
   assert.ok(csv.startsWith('strategy,route,group,from,to,from2,to2,out,ret,nights,airlines,stops,flights,times,layovers,airfare,driveAndPark,hops,total,yourDates,link,link2\n'));
   assert.equal(sb.downloads.length, 2);
   assert.ok(sb.logs.some(l => l.startsWith('Drive + parking for a 9-night trip: CAE $122')));
+});
+
+test('date hints come only from searches with all your home airports', async () => {
+  // Make the single-airport (ATL) search hint a bargain; it must not appear as if it were yours.
+  const atlHint = url => {
+    const out = fakePage(url);
+    const { legs } = decodeSearch(url);
+    return legs[0].from.join() === 'ATL' ? { ...out, body: out.body.replace(/\[\[null,(\d+)\],"tok"\]/, '[[null,1],"tok"]') } : out;
+  };
+  const sb = makeSandbox({ config: { ...oneDay, morePlaces: {}, usHubs: [], otherWeeks: [], searchOneWays: false }, respond: atlHint });
+  await sb.run();
+  assert.ok(!plain(sb.context.googleFares.hints).some(h => h.price === 1));
+});
+
+test('hub searches that never finish are reported as unfinished, not as too-tight connections', async () => {
+  const sb = makeSandbox({ config: { ...oneDay, morePlaces: {}, eachHomeAirport: [], otherWeeks: [], searchOneWays: false } });
+  const realFetch = sb.context.fetch;
+  sb.context.fetch = (url, init) => {
+    const { legs } = decodeSearch(url);
+    if (legs[0].from.length === 1 && US_HUBS.includes(legs[0].from[0])) sb.context.GF_FARE_STOP = true;
+    return realFetch(url, init);
+  };
+  await sb.run();
+  assert.ok(sb.logs.some(l => l.includes("US-hub searches didn't finish")));
+  assert.ok(!sb.logs.some(l => l.includes('No US-hub combination left')));
 });
 
 test('hub combinations need time to connect', async () => {

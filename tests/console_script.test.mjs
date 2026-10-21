@@ -15,7 +15,7 @@ const s = code => SURCHARGE[code] ?? 40;
 const HOMES = ['CHS', 'CAE', 'GSP', 'CLT'];
 const GERMANY = ['FRA', 'MUC', 'BER', 'DUS', 'HAM', 'STR', 'NUE', 'CGN', 'LEJ', 'HAJ'];
 // Settings that switch off everything v1 of the script didn't do (including drive costs).
-const BASIC = { moreAirports: {}, extraHomeAirports: [], searchNearbyAirports: false, otherWeeks: false, drive: { airports: {} } };
+const BASIC = { moreAirports: {}, extraHomeAirports: [], searchNearbyAirports: false, otherWeeks: false, drive: false };
 // Drive + parking as the script computes it with the default CONFIG.drive.
 const DRIVE = { CAE: [10, 12], CLT: [95, 14], GSP: [95, 10], CHS: [115, 13], AGS: [75, 10], SAV: [160, 7], ATL: [215, 14], MYR: [150, 12], AVL: [160, 12], RDU: [225, 10] };
 const ground = (airport, nights) => Math.round((2 * DRIVE[airport][0] * 3) / 28 + DRIVE[airport][1] * (nights + 1));
@@ -308,11 +308,17 @@ test('est. total includes gas and parking from Columbia; dropOff and extra costs
   assert.equal(trips.find(t => t.from === 'CAE' && t.nights === 8).driveAndPark, 110);
   assert.ok(sb.logs.some(l => l.startsWith('Drive + parking for a 8-night trip: CAE $110 · CLT $146 · GSP $110 · CHS $142')));
 
-  const dropped = makeSandbox({ config: { ...BASIC, searchOpenJaw: false, searchOneWays: false, homeAirportExtraCost: { CLT: 40 },
-    drive: { gasPerGallon: 3, milesPerGallon: 28, dropOff: true, airports: { CLT: { miles: 95, parkingPerDay: 14 } } } } });
+  // Overriding just dropOff keeps the airport table (drive is merged, not replaced).
+  const dropped = makeSandbox({ config: { ...BASIC, searchOpenJaw: false, searchOneWays: false, homeAirportExtraCost: { CLT: 40 }, drive: { dropOff: true } } });
   await dropped.run();
   const clt = plain(dropped.context.deltaFares.trips).find(t => t.from === 'CLT');
   assert.equal(clt.driveAndPark, Math.round((4 * 95 * 3) / 28 + 40)); // two round trips of gas, no parking, + extra
+
+  // An airport with no drive figures is flagged.
+  const unknown = makeSandbox({ config: { ...BASIC, drive: undefined, homeAirports: ['CAE', 'GSO'], searchOpenJaw: false, searchOneWays: false } });
+  delete unknown.context.DELTA_FARE_CONFIG.drive;
+  await unknown.run();
+  assert.ok(unknown.logs.some(l => l.includes('No drive/parking figures for GSO')));
 });
 
 test('with round trips off, open-jaws still use the main airports', async () => {
@@ -336,7 +342,18 @@ test('server errors are not cached and five in a row stop the run; callback time
   const down = makeSandbox({ config: BASIC, override: () => ({ status: 500, ok: false, json: async () => ({ errors: [{ message: 'Internal error' }] }) }) });
   await down.run();
   assert.equal(down.calls.length, 5);
-  assert.ok(down.logs.some(l => l.includes('the last 5 searches all failed')));
+  assert.ok(down.logs.some(l => l.includes('the last 5 searches failed (now in "Round trips")')));
+
+  // A phase that keeps failing without a Delta code (here the nearby search, HTTP 400) is
+  // skipped after 3, and the run carries on instead of tripping the 5-in-a-row stop.
+  const rejected = makeSandbox({
+    config: { exploreFromTopHomes: 3, searchOneWays: false, extraHomeAirports: [], otherWeeks: false },
+    override: legs => (legs[0].origins[0].airportRadiusMileCnt ? { status: 400, ok: false, json: async () => { throw new Error('html'); } } : null),
+  });
+  await rejected.run();
+  assert.ok(rejected.logs.some(l => l.includes('Nearby airports: the first 3 searches all failed')));
+  assert.ok(!rejected.logs.some(l => l.includes('Stopped early')));
+  assert.ok(plain(rejected.context.deltaFares.rows).some(r => r.kind === 'OJ'));
 
   // Open-jaw callbacks that never finish: transient, so the phase isn't written off after 3.
   let polls = 0;
