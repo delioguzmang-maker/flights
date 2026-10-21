@@ -25,6 +25,8 @@ SOURCES = [''.join(c['source']) for c in CELLS]
 SETTINGS, ENGINE, SEARCH, RESULTS, DOWNLOAD, EXPORT = SOURCES
 
 HOMES = ['CHS', 'CAE', 'GSP', 'CLT']
+# Drive and parking off, for tests that check fare + hop arithmetic.
+NO_DRIVE = {'drive': {'airports': {}}}
 GERMANY = ['FRA', 'MUC', 'BER', 'DUS', 'HAM', 'STR']
 # Deterministic per-airport surcharge so routes rank predictably (same as the JS test).
 SURCHARGE = {'CHS': 0, 'CAE': 40, 'GSP': 60, 'CLT': -30, 'FRA': 10, 'MUC': -50, 'BER': 30, 'DUS': 20, 'HAM': 25,
@@ -178,7 +180,7 @@ class NotebookTest(unittest.TestCase):
 
     def test_full_run(self):
         fake = FakeDelta(self)
-        ns = self.run_cells(fake, SEARCH, RESULTS, DOWNLOAD, EXPORT)
+        ns = self.run_cells(fake, SEARCH, RESULTS, DOWNLOAD, EXPORT, config=NO_DRIVE)
         rows, trips = ns['rows'], ns['trips']
         posts = [c for c in fake.calls if c['method'] == 'POST']
         self.assertEqual(len(posts), 4 * 12 + 4 * 3 * 3 * 2 + 4 * 6 * 2)
@@ -208,13 +210,13 @@ class NotebookTest(unittest.TestCase):
         self.assertTrue((one_ways['from'] == one_ways['to2']).all())
         self.assertTrue(trips['total'].is_monotonic_increasing)
 
-        self.assertTrue(Path('delta_trips.csv').read_text().startswith('strategy,route,from,to,from2,to2,out,ret,nights,stops,airfare,hops,total'))
+        self.assertTrue(Path('delta_trips.csv').read_text().startswith('strategy,route,from,to,from2,to2,out,ret,nights,stops,airfare,driveAndPark,hops,total'))
         self.assertTrue(any('How to book' in line for line in self.printed))
         self.assertTrue(any('Step 3 found fares, so skipping' in line for line in self.printed))
 
         # Second run: everything comes from the cache file.
         again = FakeDelta(self)
-        ns2 = self.run_cells(again, SEARCH, RESULTS)
+        ns2 = self.run_cells(again, SEARCH, RESULTS, config=NO_DRIVE)
         self.assertEqual(again.calls, [])
         self.assertEqual(ns2['trips'].iloc[0]['route'], top['route'])
 
@@ -243,7 +245,7 @@ class NotebookTest(unittest.TestCase):
         ]
         export_config = dict(ns['CONFIG'], hopCost=1)  # the step-1 hopCost should win
         self.uploads = {'delta-fares.json': json.dumps({'config': export_config, 'currency': 'USD', 'rows': export_rows}).encode()}
-        self.run_cells(fake, EXPORT, config={'hopCost': 100}, ns=ns)
+        self.run_cells(fake, EXPORT, config={'hopCost': 100, **NO_DRIVE}, ns=ns)
         trips = ns['trips']
         self.assertEqual(list(trips['strategy']), ['Two one-ways', 'Open-jaw', 'Round trip'])
         self.assertEqual(list(trips['total']), [880, 890, 900])
@@ -265,8 +267,19 @@ class NotebookTest(unittest.TestCase):
         self.uploads = {'delta-fares.json': json.dumps({'config': export_config, 'currency': 'USD', 'rows': rows, 'countryOf': {'SZG': 'Germany'}}).encode()}
         self.run_cells(fake, EXPORT, config={'hopCost': 100}, ns=ns)
         trips = ns['trips']
-        self.assertEqual([(t['to'], t['hops'], t['total']) for _, t in trips.iterrows()],
-                         [('AMS', 3, 900), ('SZG', 2, 905), ('FCO', 2, 950)])
+        # With the default Columbia drive table, 8 nights: CLT 95 mi + 9 days × $14 = $146,
+        # ATL 215 mi + 9 × $14 = $172; GSO has no drive figures, so nothing is added.
+        self.assertEqual([(t['to'], t['hops'], t['driveAndPark'], t['total']) for _, t in trips.iterrows()],
+                         [('SZG', 2, 0, 905), ('FCO', 2, 172, 1022), ('AMS', 3, 146, 1046)])
+
+    def test_blocked_run_all_does_not_stall(self):
+        """When Delta refuses Colab, step 4 explains why and the download cell doesn't crash."""
+        fake = FakeDelta(self, status=403)
+        self.uploads = {}
+        ns = self.run_cells(fake, SEARCH, RESULTS, DOWNLOAD)
+        self.assertEqual(ns['rows'], [])
+        self.assertTrue(any('No fares to rank: step 3 found nothing' in line for line in self.printed))
+        self.assertTrue(any('Nothing to download yet' in line for line in self.printed))
 
     def test_too_many_searches_refused(self):
         fake = FakeDelta(self)

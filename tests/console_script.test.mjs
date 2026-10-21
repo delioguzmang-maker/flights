@@ -14,8 +14,11 @@ const SURCHARGE = { CHS: 0, CAE: 40, GSP: 60, CLT: -30, FRA: 10, MUC: -50, BER: 
 const s = code => SURCHARGE[code] ?? 40;
 const HOMES = ['CHS', 'CAE', 'GSP', 'CLT'];
 const GERMANY = ['FRA', 'MUC', 'BER', 'DUS', 'HAM', 'STR', 'NUE', 'CGN', 'LEJ', 'HAJ'];
-// Settings that switch off everything v1 of the script didn't do.
-const BASIC = { moreAirports: {}, extraHomeAirports: {}, searchNearbyAirports: false, otherWeeks: false };
+// Settings that switch off everything v1 of the script didn't do (including drive costs).
+const BASIC = { moreAirports: {}, extraHomeAirports: [], searchNearbyAirports: false, otherWeeks: false, drive: { airports: {} } };
+// Drive + parking as the script computes it with the default CONFIG.drive.
+const DRIVE = { CAE: [10, 12], CLT: [95, 14], GSP: [95, 10], CHS: [115, 13], AGS: [75, 10], SAV: [160, 7], ATL: [215, 14], MYR: [150, 12], AVL: [160, 12], RDU: [225, 10] };
+const ground = (airport, nights) => Math.round((2 * DRIVE[airport][0] * 3) / 28 + DRIVE[airport][1] * (nights + 1));
 
 const plain = x => JSON.parse(JSON.stringify(x)); // copy out of the vm realm for deepEqual
 const shift = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
@@ -86,7 +89,7 @@ const nearbyGrid = (from, to) => {
 
 const ERROR = (code, more) => ({ errors: [{ message: 'error', extensions: { errors: { code, moreInfo: [{ code: more }] } } }], data: { gqlSearchOffers: null } });
 
-function makeSandbox({ config = {}, storage = new Map(), openJawUnsupported = false, nearbyUnsupported = false } = {}) {
+function makeSandbox({ config = {}, storage = new Map(), openJawUnsupported = false, nearbyUnsupported = false, override = null } = {}) {
   const calls = [];
   const logs = [];
   const downloads = [];
@@ -117,6 +120,8 @@ function makeSandbox({ config = {}, storage = new Map(), openJawUnsupported = fa
     const legs = body.variables.offerSearchCriteria.offersCriteria.flightRequestCriteria.searchOriginDestination;
     const a = legs[0].origins[0].airportCode;
     const b = legs[0].destinations[0].airportCode;
+    const custom = override && override(legs, calls.length);
+    if (custom) return custom;
 
     if (h['x-app-route'] === 'airport') {
       assert.match(body.query, /flexDestinationAirportCodes/);
@@ -232,7 +237,7 @@ test('round trips, open-jaws and one-way pairs on your dates', async () => {
   assert.ok(trips.filter(t => t.strategy === 'Two one-ways').every(t => t.from === t.to2));
   assert.ok(trips.every(t => t.yourDates));
 
-  assert.ok(csv.startsWith('strategy,route,from,to,from2,to2,out,ret,nights,stops,airfare,hops,total,yourDates\n'));
+  assert.ok(csv.startsWith('strategy,route,from,to,from2,to2,out,ret,nights,stops,airfare,driveAndPark,hops,total,yourDates\n'));
   assert.equal(sb.downloads.length, 2);
   assert.ok(sb.logs.some(l => l.includes('How to book')));
 });
@@ -258,29 +263,95 @@ test('default plan also tries more airports, nearby airports, more home airports
   const nearby = sb.posts('airport').map(legsOf);
   assert.equal(nearby.length, 4);
   assert.deepEqual(nearby.map(l => l[0][0]).sort(), ['CHS', 'CHS', 'CLT', 'CLT']);
-  assert.deepEqual(discovered.sort(), ['BGY', 'GSO', 'SZG']);
-  assert.ok(rows.some(r => r.kind === 'RT' && r.from === 'GSO' && r.to === 'SZG'));
+  assert.deepEqual(discovered.sort(), ['BGY', 'SZG']);
+  // GSO turned up on the home side, but with no drive cost it's only reported, not ranked.
+  assert.ok(!rows.some(r => r.from === 'GSO'));
+  assert.ok(sb.logs.some(l => l.includes('It also lists these airports near yours') && l.includes('GSO')));
+  assert.ok(rows.some(r => r.kind === 'RT' && r.to === 'SZG'));
   assert.equal(trips.find(t => t.to === 'SZG' && t.strategy === 'Round trip').hops, 2, 'SZG counts as Germany (it is near MUC)');
 
-  // More home airports: each extra home × the 6 gateways; ATL's $100 extra cost is in the total.
-  const atl = dates.filter(l => l[0][0] === 'ATL');
-  assert.equal(atl.length, 6);
+  // More home airports: each extra home × the 6 gateways, with its own drive and parking cost.
+  for (const h of ['ATL', 'AGS', 'SAV', 'MYR', 'AVL', 'RDU']) assert.equal(dates.filter(l => l[0][0] === h).length, 6, h);
   const atlTrip = trips.find(t => t.from === 'ATL');
-  assert.equal(atlTrip.total, atlTrip.airfare + atlTrip.hops * 75 + 100);
-  assert.ok(sb.logs.some(l => l.includes('Best trip from each other home airport')));
+  assert.equal(atlTrip.driveAndPark, ground('ATL', atlTrip.nights));
+  assert.equal(atlTrip.total, atlTrip.airfare + atlTrip.hops * 75 + ground('ATL', atlTrip.nights));
+  assert.ok(sb.logs.some(l => l.includes('Best trip from each home airport')));
 
-  // Other weeks: the 5 cheapest routes on your dates, moved −3…+3 weeks; earlier is cheaper here.
+  // Other weeks: the 5 cheapest routes on your dates, the searched block moved −3…+3 weeks,
+  // so the shifted grids tile with it (Dec 10, Dec 3, Nov 26 / Dec 24, Dec 31, Jan 7 centres).
   const shifted = dates.filter(l => l.length === 2 && l[0][2] !== '2026-12-17'); // your-dates grids are centred on Dec 17
   assert.equal(shifted.length, 5 * 6);
+  assert.deepEqual([...new Set(shifted.map(l => l[0][2]))].sort(), ['2026-11-26', '2026-12-03', '2026-12-10', '2026-12-24', '2026-12-31', '2027-01-07']);
   assert.ok(otherDates.length > 0);
   assert.ok(otherDates.every(t => !t.yourDates));
   const earliest = otherDates[0];
   assert.ok(earliest.out < '2026-12-01', earliest.out);
   const sameRouteYourDates = bestPerRoute.find(t => t.strategy === earliest.strategy && t.route === earliest.route);
   assert.equal(Math.round(sameRouteYourDates.total - earliest.total), 120, '3 weeks earlier saves 3 × $40');
+  assert.ok(otherDates.every(t => t.total < bestPerRoute[0].total), 'only moves that beat your best option');
   assert.ok(sb.logs.some(l => l.includes('Cheaper if you can move the trip')));
   assert.ok(bestPerRoute.every(t => t.yourDates));
   assert.ok(sb.logs.some(l => l.includes('Cheapest round trip to each European airport')));
+});
+
+test('est. total includes gas and parking from Columbia; dropOff and extra costs', async () => {
+  const sb = makeSandbox({ config: { ...BASIC, drive: undefined, searchOpenJaw: false, searchOneWays: false } });
+  delete sb.context.DELTA_FARE_CONFIG.drive; // use the default Columbia drive table
+  await sb.run();
+  const { trips } = plain(sb.context.deltaFares);
+  for (const h of ['CAE', 'CLT', 'GSP', 'CHS']) {
+    const t = trips.find(x => x.from === h);
+    assert.equal(t.driveAndPark, ground(h, t.nights), h);
+    assert.equal(t.total, t.airfare + t.hops * 75 + ground(h, t.nights), h);
+  }
+  // 8 nights at CAE: 20 miles of gas ($2) + 9 days × $12 parking = $110.
+  assert.equal(trips.find(t => t.from === 'CAE' && t.nights === 8).driveAndPark, 110);
+  assert.ok(sb.logs.some(l => l.startsWith('Drive + parking for a 8-night trip: CAE $110 · CLT $146 · GSP $110 · CHS $142')));
+
+  const dropped = makeSandbox({ config: { ...BASIC, searchOpenJaw: false, searchOneWays: false, homeAirportExtraCost: { CLT: 40 },
+    drive: { gasPerGallon: 3, milesPerGallon: 28, dropOff: true, airports: { CLT: { miles: 95, parkingPerDay: 14 } } } } });
+  await dropped.run();
+  const clt = plain(dropped.context.deltaFares.trips).find(t => t.from === 'CLT');
+  assert.equal(clt.driveAndPark, Math.round((4 * 95 * 3) / 28 + 40)); // two round trips of gas, no parking, + extra
+});
+
+test('with round trips off, open-jaws still use the main airports', async () => {
+  const sb = makeSandbox({ config: { searchRoundTrips: false, searchOneWays: false, searchNearbyAirports: false, extraHomeAirports: [], otherWeeks: false } });
+  await sb.run();
+  const oj = plain(sb.context.deltaFares.rows).filter(r => r.kind === 'OJ');
+  assert.deepEqual([...new Set(oj.flatMap(r => [r.to, r.from2]))].sort(), ['BER', 'FCO', 'FRA', 'MUC', 'MXP', 'VCE']);
+});
+
+test('server errors are not cached and five in a row stop the run; callback time-outs do not skip a phase', async () => {
+  const storage = new Map();
+  let n = 0;
+  // Searches 3 and 4 fail with HTTP 500 (non-JSON); everything else works.
+  const flaky = makeSandbox({ storage, config: BASIC, override: () => (++n === 3 || n === 4 ? { status: 500, ok: false, json: async () => { throw new Error('html'); } } : null) });
+  await flaky.run();
+  assert.ok(flaky.logs.some(l => l.includes('no fares (HTTP 500)')));
+  const again = makeSandbox({ storage, config: BASIC });
+  await again.run();
+  assert.equal(again.calls.length, 2, 'only the two failed searches are re-sent');
+
+  const down = makeSandbox({ config: BASIC, override: () => ({ status: 500, ok: false, json: async () => ({ errors: [{ message: 'Internal error' }] }) }) });
+  await down.run();
+  assert.equal(down.calls.length, 5);
+  assert.ok(down.logs.some(l => l.includes('the last 5 searches all failed')));
+
+  // Open-jaw callbacks that never finish: transient, so the phase isn't written off after 3.
+  let polls = 0;
+  const slow = makeSandbox({
+    config: { ...BASIC, searchOneWays: false },
+    override: legs => (legs.length === 2 && legs[1].origins[0].airportCode !== legs[0].destinations[0].airportCode && ++polls <= 3
+      ? { status: 200, ok: true, json: async () => ({ errors: [{ message: 'pending', extensions: { errors: { code: 'ROF5004', moreInfo: [{ code: 'PXY1007', callbackId: 'never', callbackInSecs: 1 }] } } }] }) }
+      : null),
+  });
+  slow.context.fetch = (orig => async (url, init) => (url.endsWith('/never')
+    ? { status: 200, ok: true, json: async () => ({ errors: [{ message: 'pending', extensions: { errors: { code: 'ROF5004', moreInfo: [{ code: 'PXY1007', callbackId: 'never', callbackInSecs: 1 }] } } }] }) }
+    : orig(url, init)))(slow.context.fetch);
+  await slow.run();
+  assert.ok(!slow.logs.some(l => l.includes('Skipping the rest')));
+  assert.ok(plain(slow.context.deltaFares.rows).some(r => r.kind === 'OJ'));
 });
 
 test('second run is served from the cache', async () => {
@@ -307,16 +378,18 @@ test('phases the API rejects are skipped after three failures', async () => {
 });
 
 test('mixHomeAirports pairs one-ways across home airports and stop flag halts cleanly', async () => {
-  const sb = makeSandbox({ config: { ...BASIC, searchOpenJaw: false, mixHomeAirports: true, homeAirportExtraCost: { CHS: 0, CAE: 0, GSP: 0, CLT: 100 } } });
+  // One-ways come from the two cheapest homes (CLT, CHS); leaving CLT and coming home to CHS
+  // averages the two airports' costs (0 and 20).
+  const sb = makeSandbox({ config: { ...BASIC, searchOpenJaw: false, mixHomeAirports: true, homeAirportExtraCost: { CHS: 20 } } });
   await sb.run();
   const mixed = plain(sb.context.deltaFares.trips).filter(t => t.strategy === 'Two one-ways' && t.from !== t.to2);
   assert.ok(mixed.length > 0);
   const t = mixed.find(x => x.from === 'CLT' && x.to2 === 'CHS');
-  assert.equal(t.total, t.airfare + t.hops * 75 + 50);
+  assert.equal(t.total, t.airfare + t.hops * 75 + 10);
 
   // A stop flag left over from an earlier run is cleared; setting it mid-run stops after
   // the current search and still ranks what was found.
-  const stopped = makeSandbox();
+  const stopped = makeSandbox({ config: BASIC });
   stopped.context.DELTA_FARE_STOP = true;
   const realFetch = stopped.context.fetch;
   stopped.context.fetch = (...args) => {
@@ -326,7 +399,7 @@ test('mixHomeAirports pairs one-ways across home airports and stop flag halts cl
   await stopped.run();
   assert.equal(stopped.calls.length, 1);
   assert.ok(stopped.logs.some(l => l.includes('Stopped early')));
-  assert.equal(plain(stopped.context.deltaFares.bestPerRoute)[0].route, 'CHS ⇄ FRA');
+  assert.equal(plain(stopped.context.deltaFares.bestPerRoute)[0].route, 'CAE ⇄ FRA');
 });
 
 test('refuses to run off delta.com and when the plan exceeds maxRequests', async () => {

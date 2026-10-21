@@ -6,11 +6,14 @@
  * then ranks round trips, open-jaw (multi-city) trips and pairs of one-way tickets by
  * what the whole trip costs, including getting between countries once you're in Europe.
  *
+ * Every trip's estimated total includes the drive to the airport and back and parking for
+ * the whole trip (set up for Columbia, SC; edit CONFIG.drive for where you live).
+ *
  * Beyond your own airports and dates it also checks, by default:
  *   - more airports: smaller German/Italian airports and cheap hubs elsewhere in Europe
  *     (Amsterdam, Paris, Madrid, …) that you'd continue from by train or budget flight;
  *   - airports Delta itself lists within 100 miles of your best routes (experimental);
- *   - more home airports you could drive to (Atlanta is Delta's hub), with a cost you set;
+ *   - more home airports you could drive to (Atlanta is Delta's hub, Augusta, Savannah…);
  *   - earlier and later weeks for the cheapest routes, in case moving the trip saves money.
  *
  * HOW TO RUN
@@ -18,8 +21,8 @@
  *   2. Open DevTools (F12, or Cmd+Option+J on a Mac) and pick the Console tab.
  *   3. Change CONFIG below if you want (dates, airports), paste this whole file and press
  *      Enter. Chrome may first ask you to type "allow pasting".
- *   4. Leave the tab open. Progress prints as it goes (the default plan is ~240 searches,
- *      about 13–15 minutes). Results print as tables and download as CSV + JSON.
+ *   4. Leave the tab open. Progress prints as it goes (the default plan is ~250 searches,
+ *      about 14–16 minutes). Results print as tables and download as CSV + JSON.
  *
  * Stop early:  window.DELTA_FARE_STOP = true   (the results so far are still ranked)
  * Re-running is cheap: grids fetched in the last few hours are reused from localStorage,
@@ -30,10 +33,33 @@
   'use strict';
 
   const CONFIG = Object.assign({
-    // Airports you can leave from and come home to.
-    homeAirports: ['CHS', 'CAE', 'GSP', 'CLT'],
-    // What using each home airport costs you (gas, parking), added once per trip.
-    homeAirportExtraCost: { CHS: 0, CAE: 0, GSP: 0, CLT: 0 },
+    // Airports you can leave from and come home to, searched for every route.
+    homeAirports: ['CAE', 'CLT', 'GSP', 'CHS'],
+
+    // Getting to the airport. Every trip's est. total adds gas for the drive there and back
+    // plus parking for each day you're away (nights + 1). Miles are one way from Columbia,
+    // SC; parking is each airport's cheapest on-airport long-term lot (airport websites,
+    // Oct 2026). Edit for where you live. dropOff: true = someone drives you (gas for two
+    // round trips, no parking).
+    drive: {
+      gasPerGallon: 3.00,
+      milesPerGallon: 28,
+      dropOff: false,
+      airports: {
+        CAE: { miles: 10, parkingPerDay: 12 },
+        CLT: { miles: 95, parkingPerDay: 14 },
+        GSP: { miles: 95, parkingPerDay: 10 },
+        CHS: { miles: 115, parkingPerDay: 13 },
+        AGS: { miles: 75, parkingPerDay: 10 },
+        SAV: { miles: 160, parkingPerDay: 7 },
+        ATL: { miles: 215, parkingPerDay: 14 },
+        MYR: { miles: 150, parkingPerDay: 12 },
+        AVL: { miles: 160, parkingPerDay: 12 },
+        RDU: { miles: 225, parkingPerDay: 10 },
+      },
+    },
+    // Anything else an airport costs you per trip, e.g. { ATL: 120 } for a hotel the night before.
+    homeAirportExtraCost: {},
 
     // European airports to price, grouped by country.
     destinations: {
@@ -69,7 +95,7 @@
 
     // ----- other possibilities (set any of these to false / {} / [] to skip) -----
     // The exploring phases below search only from your N cheapest home airports
-    // (in the last run all four were within $10 of each other).
+    // (ranked by airfare plus drive and parking).
     exploreFromTopHomes: 2,
     // More places to fly into, grouped by country. Airports in a visitCountries country
     // count as that country; anything else adds a hop (you'd take a train/budget flight on).
@@ -86,9 +112,9 @@
     },
     // Ask Delta which airports lie within 100 miles of your best routes, both ends (experimental).
     searchNearbyAirports: true,
-    // Other home airports and what using each costs you compared with your usual ones
-    // (gas, tolls, parking for the trip). Rough guesses: edit them.
-    extraHomeAirports: { ATL: 100, SAV: 50, MYR: 50, AVL: 50, RDU: 90 },
+    // Farther airports to try against the best European airports (their drive and parking
+    // costs come from drive.airports).
+    extraHomeAirports: ['ATL', 'AGS', 'SAV', 'MYR', 'AVL', 'RDU'],
     // Re-check the cheapest routes with the whole trip moved earlier or later by these many weeks.
     otherWeeks: { routes: 5, shifts: [-3, -2, -1, 1, 2, 3] },
 
@@ -263,10 +289,27 @@
   const allDestinations = Object.values(CONFIG.destinations).flat();
   const moreDestinations = [...new Set(Object.values(CONFIG.moreAirports || {}).flat())].filter(a => !allDestinations.includes(a));
   const homes = CONFIG.homeAirports;
-  const extraHomes = Object.keys(CONFIG.extraHomeAirports || {}).filter(a => !homes.includes(a));
-  const homeCosts = { ...CONFIG.extraHomeAirports, ...CONFIG.homeAirportExtraCost };
-  const tripCountries = CONFIG.visitCountries.filter(c => CONFIG.destinations[c]);
-  const discovered = new Set(); // airports found by the nearby-airports search
+  const extraHomes = (Array.isArray(CONFIG.extraHomeAirports) ? CONFIG.extraHomeAirports : Object.keys(CONFIG.extraHomeAirports || {}))
+    .filter(a => !homes.includes(a));
+  const knownCountries = new Set([...Object.keys(CONFIG.destinations), ...Object.keys(CONFIG.moreAirports || {})]);
+  for (const c of CONFIG.visitCountries) {
+    if (!knownCountries.has(c)) console.warn(`visitCountries lists ${c}, but no airport in destinations or moreAirports is there; leaving it out of the hop count.`);
+  }
+  const tripCountries = CONFIG.visitCountries.filter(c => knownCountries.has(c));
+  const discovered = new Set(); // European airports found by the nearby-airports search
+  const otherOrigins = {}; // home-side airports it found that aren't in your lists: code → best fare
+
+  // Gas to the airport and back plus parking for every day away (or gas for two round trips
+  // when someone drops you off), plus anything in homeAirportExtraCost.
+  function groundCost(airport, nights) {
+    const d = CONFIG.drive || {};
+    const a = (d.airports || {})[airport];
+    const extra = (CONFIG.homeAirportExtraCost || {})[airport] || 0;
+    if (!a) return extra;
+    const gasPerMile = (d.gasPerGallon || 0) / (d.milesPerGallon || 25);
+    const drive = d.dropOff ? 4 * a.miles * gasPerMile : 2 * a.miles * gasPerMile + (a.parkingPerDay || 0) * (nights + 1);
+    return Math.round(drive + extra);
+  }
 
   // ---------- API ----------
   // Flexible-dates leg: the API answers with a 7×7 grid around the date sent.
@@ -407,7 +450,9 @@
       const offers = json?.data?.gqlSearchOffers;
       if (offers) return { cells: MODES[mode].parse(offers) };
       const err = errorInfo(json?.errors?.[0]);
-      if (err.code !== CALLBACK_CODE || !err.callbackId) return { cells: [], error: err.code || err.message || 'empty response' };
+      // Errors with a Delta code (e.g. ROF4002_404: no service) are answers worth caching;
+      // anything else (HTTP 500, a bare GraphQL error, an empty body) may work next time.
+      if (err.code !== CALLBACK_CODE || !err.callbackId) return { cells: [], error: err.code || err.message || 'empty response', transient: !err.code };
       if (polls === 10) return { cells: [], error: 'gave up waiting for callback', transient: true };
       await sleep(Math.max(1, err.callbackInSecs) * 1000);
       json = await http(CALLBACK_URL + encodeURIComponent(err.callbackId), { headers: { Authorization: 'GUEST' } });
@@ -433,6 +478,7 @@
     }
   };
   let requests = 0;
+  let failuresInARow = 0;
   async function request(mode, legs) {
     // Dates-grid keys keep the format of earlier versions, so their cache still counts.
     const key = JSON.stringify(mode === 'dates'
@@ -444,7 +490,10 @@
     if (requests > 0) await sleep(CONFIG.delayMs[0] + Math.random() * (CONFIG.delayMs[1] - CONFIG.delayMs[0]));
     requests++;
     const result = await fetchOffers(mode, legs);
-    if (!result.transient) {
+    if (result.transient) {
+      if (++failuresInARow >= 5) throw new Halt('the last 5 searches all failed; Delta may be blocking this browser for now. Wait a while and re-run');
+    } else {
+      failuresInARow = 0;
       cache[key] = { t: Date.now(), currency, cells: result.cells, error: result.error };
       saveCache();
     }
@@ -466,16 +515,19 @@
 
   function makeTrip(strategy, from, to, from2, to2, out, ret, airfare, stops) {
     const hops = hopsNeeded(countryOf[to], countryOf[from2]);
-    const homeCost = ((homeCosts[from] || 0) + (homeCosts[to2] || 0)) / 2;
+    const nights = nightsBetween(out, ret);
+    // Leaving from one airport and coming home to another (mixHomeAirports): average the two.
+    const ground = (groundCost(from, nights) + groundCost(to2, nights)) / 2;
     return {
       strategy,
       route: from === to2 && to === from2 ? `${from} ⇄ ${to}` : `${from} → ${to} … ${from2} → ${to2}`,
       from, to, from2, to2, out, ret,
-      nights: nightsBetween(out, ret),
+      nights,
       stops,
       airfare,
       hops,
-      total: airfare + hops * CONFIG.hopCost * CONFIG.adults + homeCost,
+      driveAndPark: ground,
+      total: airfare + hops * CONFIG.hopCost * CONFIG.adults + ground,
       yourDates: inDates(out, ret),
     };
   }
@@ -525,7 +577,7 @@
       const outcome = best != null ? `from ${money(best)}${task.describe ? task.describe(added) : ''}` : `no fares${result.error ? ` (${result.error})` : ''}`;
       console.log(`[${name} ${n + 1}/${tasks.length}] ${task.label}: ${outcome}${result.cached ? ' (cached)' : ''}`);
       const probe = Math.min(2, tasks.length - 1);
-      if (bailIfUnsupported && n === probe && tasks.slice(0, probe + 1).every(t => t.result.error)) {
+      if (bailIfUnsupported && n === probe && tasks.slice(0, probe + 1).every(t => t.result.error && !t.result.transient)) {
         console.warn(`${name}: the first ${probe + 1} searches all failed, so Delta's API probably doesn't offer these. Skipping the rest.`);
         return false;
       }
@@ -549,26 +601,28 @@
   const openJaw = (h, x, y, pair, suffix = shiftLabel(pair)) => gridTask(
     { kind: 'OJ', from: h, to: x, from2: y, to2: h }, [leg(h, x, pair[0]), leg(y, h, pair[1])], `${h} → ${x} … ${y} → ${h}${suffix}`);
 
-  // Cheapest round-trip fare per airport on your dates.
-  const bestRoundTripBy = side => {
-    const best = {};
-    for (const r of rows) if (r.kind === 'RT' && inDates(r.out, r.ret)) best[r[side]] = Math.min(best[r[side]] ?? Infinity, r.price);
-    return best;
-  };
-  // Your N cheapest home airports (all of them if nothing is priced yet).
+  const usable = r => r.kind === 'RT' && inDates(r.out, r.ret) && nightsOk(r.out, r.ret);
+  // Your N cheapest home airports by airfare plus drive and parking (all of them if nothing
+  // is priced yet).
   function topHomes() {
-    const best = bestRoundTripBy('from');
+    const best = {};
+    for (const r of rows) {
+      if (usable(r) && homes.includes(r.from)) best[r.from] = Math.min(best[r.from] ?? Infinity, r.price + groundCost(r.from, nightsBetween(r.out, r.ret)));
+    }
     const ranked = homes.filter(h => best[h] != null).sort((a, b) => best[a] - best[b]);
     return (ranked.length ? ranked : homes).slice(0, Math.max(1, CONFIG.exploreFromTopHomes || homes.length));
   }
-  // The N cheapest airports per visit country so far (or the first N listed).
+  // The N cheapest airports per visit country so far. Until one of your main destinations
+  // there has a price (e.g. round trips are switched off), use the first N main destinations.
   function pickGateways() {
-    const best = bestRoundTripBy('to');
+    const best = {};
+    for (const r of rows) if (usable(r)) best[r.to] = Math.min(best[r.to] ?? Infinity, r.price);
     const picked = {};
     for (const country of tripCountries) {
-      const airports = Object.keys(countryOf).filter(a => countryOf[a] === country);
-      const priced = airports.filter(a => best[a] != null).sort((a, b) => best[a] - best[b]);
-      picked[country] = (priced.length ? priced : CONFIG.destinations[country]).slice(0, CONFIG.gatewaysPerCountry);
+      const main = CONFIG.destinations[country] || [];
+      const pool = main.some(a => best[a] != null) || !main.length ? Object.keys(countryOf).filter(a => countryOf[a] === country) : main;
+      const priced = pool.filter(a => best[a] != null).sort((a, b) => best[a] - best[b]);
+      picked[country] = (priced.length ? priced : main).slice(0, CONFIG.gatewaysPerCountry);
     }
     return picked;
   }
@@ -597,7 +651,7 @@
       for (const h of fromList) {
         let best = null;
         for (const r of rows) {
-          if (r.kind === 'RT' && r.from === h && countryOf[r.to] === country && inDates(r.out, r.ret) && (!best || r.price < best.price)) best = r;
+          if (usable(r) && r.from === h && countryOf[r.to] === country && (!best || r.price < best.price)) best = r;
         }
         if (!best) continue;
         tasks.push({
@@ -608,11 +662,16 @@
               countryOf[to] = country; // close enough: it is within 100 miles of an airport there
               discovered.add(to);
             }
-            if (!homes.includes(from) && !extraHomes.includes(from)) discovered.add(from);
+            // A home-side airport you haven't listed has no drive cost to compare fairly, so
+            // it's only reported, not ranked.
+            if (!homes.includes(from) && !extraHomes.includes(from)) {
+              if (!otherOrigins[from] || price < otherOrigins[from].price) otherOrigins[from] = { to, price, out: best.out, ret: best.ret };
+              return null;
+            }
             const r = { kind: 'RT', from, to, from2: to, to2: from, out: best.out, ret: best.ret, price, stops: null };
             rows.push(r);
             return r;
-          }),
+          }).filter(Boolean),
           describe: added => ` (${[...new Set(added.map(r => r.from))].join('/')} → ${[...new Set(added.map(r => r.to))].join('/')})`,
         });
       }
@@ -621,18 +680,31 @@
   }
 
   // The same trip moved earlier or later by whole weeks, for the cheapest routes on your dates.
+  // Each shifted search is the searched 7×7 block that held the route's best fare, moved by
+  // whole weeks, so the shifted blocks sit next to it with no gap and no overlap.
   function otherWeekTasks() {
     const shifts = (CONFIG.otherWeeks && CONFIG.otherWeeks.shifts) || [];
+    const searched = new Set(blockPairs.map(p => p.join('|')));
     const best = bestPerRoute(buildTrips().filter(t => t.yourDates && t.strategy !== 'Two one-ways')).slice(0, CONFIG.otherWeeks.routes || 0);
-    return best.flatMap(t => shifts.map(k => {
-      const pair = [addDays(t.out, 7 * k), addDays(t.ret, 7 * k)];
-      const suffix = ` [${k > 0 ? '+' : ''}${k} wk: ${pair[0]} → ${pair[1]} ±3 days]`;
-      return t.strategy === 'Round trip' ? roundTrip(t.from, t.to, pair, suffix) : openJaw(t.from, t.to, t.from2, pair, suffix);
-    })).filter(task => task.legs[0].departureLocalTs.slice(0, 10) > isoDay(Date.now() + 3 * DAY));
+    return best.flatMap(t => {
+      const base = blockPairs.find(([o, r]) => Math.abs(nightsBetween(o, t.out)) <= 3 && Math.abs(nightsBetween(r, t.ret)) <= 3) || [t.out, t.ret];
+      return shifts
+        .map(k => [k, [addDays(base[0], 7 * k), addDays(base[1], 7 * k)]])
+        .filter(([, pair]) => !searched.has(pair.join('|')))
+        .map(([k, pair]) => {
+          const suffix = ` [${k > 0 ? '+' : ''}${k} wk: ${addDays(pair[0], -3)}…${addDays(pair[0], 3)} / ${addDays(pair[1], -3)}…${addDays(pair[1], 3)}]`;
+          return t.strategy === 'Round trip' ? roundTrip(t.from, t.to, pair, suffix) : openJaw(t.from, t.to, t.from2, pair, suffix);
+        });
+    }).filter(task => task.legs[0].departureLocalTs.slice(0, 10) > isoDay(Date.now() + 3 * DAY));
   }
 
   // ---------- plan ----------
-  const plannedGateways = Object.fromEntries(tripCountries.map(c => [c, CONFIG.destinations[c].slice(0, CONFIG.gatewaysPerCountry)]));
+  // Upper bound for the estimate: gateways can also come from moreAirports and nearby finds.
+  const plannedGateways = Object.fromEntries(tripCountries.map(c => {
+    const pool = Object.keys(countryOf).filter(a => countryOf[a] === c).length;
+    const n = CONFIG.searchNearbyAirports ? CONFIG.gatewaysPerCountry : Math.min(CONFIG.gatewaysPerCountry, pool);
+    return [c, Array.from({ length: n }, (_, i) => `${c}${i}`)];
+  }));
   const exploreHomes = homes.slice(0, Math.max(1, CONFIG.exploreFromTopHomes || homes.length));
   const plan = {
     'Round trips': CONFIG.searchRoundTrips ? roundTripTasks(homes, allDestinations).length : 0,
@@ -654,6 +726,8 @@
     return;
   }
   if (CONFIG.departDates[0] < isoDay(Date.now())) console.warn('departDates starts in the past; those dates will come back empty.');
+  const typicalNights = Math.max(0, nightsBetween(CONFIG.departDates[0], CONFIG.returnDates[0]));
+  console.log(`Drive + parking for a ${typicalNights}-night trip: ${[...homes, ...extraHomes].map(a => `${a} ${money(groundCost(a, typicalNights))}`).join(' · ')}`);
 
   window.DELTA_FARE_STOP = false; // clear a stop left over from an earlier run
   let haltedBy = null;
@@ -694,6 +768,7 @@
     nights: t.nights,
     stops: t.stops,
     airfare: money(t.airfare),
+    'drive + park': money(t.driveAndPark),
     'Europe hops': t.hops,
     'est. total': money(t.total),
   });
@@ -705,22 +780,28 @@
   }
 
   if (best.length) {
-    console.log(`%cCheapest by strategy on your dates (est. total includes ${money(CONFIG.hopCost)} per person per hop between ${tripCountries.join(' and ')}):`, 'font-weight:bold');
+    console.log(`%cCheapest by strategy on your dates (est. total = airfare + drive & parking + ${money(CONFIG.hopCost)} per person per hop between ${tripCountries.join(' and ')}):`, 'font-weight:bold');
     console.table(best.filter((t, i, all) => all.findIndex(x => x.strategy === t.strategy) === i).map(display));
 
     console.log(`%cTop ${CONFIG.showTop} routes on your dates (best dates for each):`, 'font-weight:bold');
     console.table(best.slice(0, CONFIG.showTop).map(display));
   }
 
-  // Other weeks: only where moving the trip beats that route on your dates.
+  // Other weeks: only moves that beat the best option on your dates.
   const yourBest = {};
   for (const t of best) yourBest[`${t.strategy}|${t.route}`] = t.total;
-  const otherDates = bestPerRoute(trips.filter(t => !t.yourDates))
-    .filter(t => !(yourBest[`${t.strategy}|${t.route}`] <= t.total))
-    .slice(0, 10);
+  const bestTotal = best.length ? best[0].total : Infinity;
+  const otherDates = bestPerRoute(trips.filter(t => !t.yourDates)).filter(t => t.total < bestTotal).slice(0, 10);
   if (otherDates.length) {
     console.log('%cCheaper if you can move the trip:', 'font-weight:bold');
-    console.table(otherDates.map(t => ({ ...display(t), 'vs your dates': yourBest[`${t.strategy}|${t.route}`] != null ? `−${money(yourBest[`${t.strategy}|${t.route}`] - t.total)}` : '' })));
+    console.table(otherDates.map(t => {
+      const same = yourBest[`${t.strategy}|${t.route}`];
+      return {
+        ...display(t),
+        'vs your best': bestTotal < Infinity ? `−${money(bestTotal - t.total)}` : '',
+        'vs this route on your dates': same != null ? `−${money(same - t.total)}` : 'not priced',
+      };
+    }));
   }
 
   const airportsTable = {};
@@ -753,14 +834,17 @@
     console.table(matrix);
   }
 
-  const otherHomes = [...extraHomes, ...[...discovered].filter(a => rows.some(r => r.from === a))]
-    .map(h => best.find(t => t.from === h))
-    .filter(Boolean);
-  if (otherHomes.length) {
-    console.log('%cBest trip from each other home airport (est. total includes the extra cost you set):', 'font-weight:bold');
-    console.table(otherHomes.map(t => ({ ...display(t), 'extra cost': money(homeCosts[t.from] || 0) })));
+  const byHome = [...homes, ...extraHomes].map(h => best.find(t => t.from === h)).filter(Boolean).sort((a, b) => a.total - b.total);
+  if (byHome.length) {
+    console.log('%cBest trip from each home airport, drive and parking included:', 'font-weight:bold');
+    console.table(byHome.map(display));
   }
-  if (discovered.size) console.log(`Delta's nearby-airports search also turned up: ${[...discovered].join(', ')}.`);
+  if (discovered.size) console.log(`Delta's nearby-airports search also turned up these European airports: ${[...discovered].join(', ')}.`);
+  const others = Object.entries(otherOrigins).sort((a, b) => a[1].price - b[1].price);
+  if (others.length) {
+    console.log(`It also lists these airports near yours (not ranked, no drive cost set): ${others.map(([a, o]) => `${a} ⇄ ${o.to} ${money(o.price)}`).join(', ')}. `
+      + 'To compare one properly, add it to drive.airports (miles, parking) and extraHomeAirports.');
+  }
 
   console.log('%cHow to book on delta.com:', 'font-weight:bold');
   best.slice(0, 5).forEach((t, i) => console.log(`${i + 1}. ${money(t.total)} est. (${money(t.airfare)} airfare): ${howToBook(t)}`));
@@ -768,10 +852,12 @@
   console.log('Prices are for the whole party, before seat/bag fees, and can change by the minute. Search the exact dates on delta.com to confirm.');
 
   const csvCell = v => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-  const columns = ['strategy', 'route', 'from', 'to', 'from2', 'to2', 'out', 'ret', 'nights', 'stops', 'airfare', 'hops', 'total', 'yourDates'];
+  const columns = ['strategy', 'route', 'from', 'to', 'from2', 'to2', 'out', 'ret', 'nights', 'stops', 'airfare', 'driveAndPark', 'hops', 'total', 'yourDates'];
   const csv = [columns.join(','), ...trips.map(t => columns.map(c => csvCell(t[c])).join(','))].join('\n');
 
-  window.deltaFares = { config: CONFIG, currency, rows, trips, bestPerRoute: best, otherDates, discovered: [...discovered], csv };
+  // Raw fares, for the Colab notebook's "analyze a console export" section.
+  const exported = { config: CONFIG, currency, rows, countryOf };
+  window.deltaFares = { config: CONFIG, currency, rows, trips, bestPerRoute: best, otherDates, discovered: [...discovered], otherOrigins, csv, export: exported };
   console.log('Everything is in window.deltaFares (rows = raw fares, trips = every combination, bestPerRoute = your-dates table).');
 
   if (CONFIG.download) {
@@ -785,8 +871,9 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     };
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    console.log('Downloading delta-trips (CSV) and delta-fares (JSON). If the browser asks to allow multiple downloads, allow it. '
+      + 'If the JSON doesn\'t arrive, type  copy(JSON.stringify(deltaFares.export))  here and paste it into a file.');
     save(`delta-trips-${stamp}.csv`, csv, 'text/csv');
-    // Raw fares, for the Colab notebook's "analyze a console export" section.
-    save(`delta-fares-${stamp}.json`, JSON.stringify({ config: CONFIG, currency, rows, countryOf }), 'application/json');
+    save(`delta-fares-${stamp}.json`, JSON.stringify(exported), 'application/json');
   }
 })();
